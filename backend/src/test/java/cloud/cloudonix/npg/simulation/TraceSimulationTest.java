@@ -270,7 +270,7 @@ class TraceSimulationTest {
             })
             .compose(rows -> {
                 Row inboxRow = rows.iterator().next();
-                return registry.handle(inboxRow);
+                return pool.withTransaction(tx -> registry.handle(tx, inboxRow));
             })
             .compose(v -> pool.preparedQuery(
                 "SELECT phone_number, number_type FROM np_numbers WHERE phone_number = ?")

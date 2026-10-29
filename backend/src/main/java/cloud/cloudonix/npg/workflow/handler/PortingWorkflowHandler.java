@@ -12,6 +12,7 @@ import io.vertx.core.impl.logging.LoggerFactory;
 import io.vertx.core.json.JsonObject;
 import io.vertx.sqlclient.Pool;
 import io.vertx.sqlclient.Row;
+import io.vertx.sqlclient.SqlConnection;
 import io.vertx.sqlclient.Tuple;
 
 import java.util.Map;
@@ -37,7 +38,7 @@ public class PortingWorkflowHandler implements WorkflowHandler {
     }
 
     @Override
-    public Future<Void> handle(Row inboxItem) {
+    public Future<Void> handle(SqlConnection tx, Row inboxItem) {
         String itemType = inboxItem.getString("item_type");
         return switch (itemType) {
             case "Check" -> handleCheck(inboxItem);

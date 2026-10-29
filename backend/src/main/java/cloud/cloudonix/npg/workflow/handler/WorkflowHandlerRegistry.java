@@ -8,6 +8,7 @@ import cloud.cloudonix.npg.workflow.WorkflowEngine;
 import io.vertx.core.Future;
 import io.vertx.sqlclient.Pool;
 import io.vertx.sqlclient.Row;
+import io.vertx.sqlclient.SqlConnection;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -28,14 +29,14 @@ public class WorkflowHandlerRegistry {
         handlers.put("DATA_SYNCHRONIZATION", new SynchronizationWorkflowHandler());
     }
 
-    public Future<Void> handle(Row inboxItem) {
+    public Future<Void> handle(SqlConnection tx, Row inboxItem) {
         String itemType = inboxItem.getString("item_type");
         String family = resolveFamily(itemType);
         WorkflowHandler handler = family != null ? handlers.get(family) : null;
         if (handler == null) {
             return Future.failedFuture(new PermanentProcessingException("No handler for message type: " + itemType));
         }
-        return handler.handle(inboxItem);
+        return handler.handle(tx, inboxItem);
     }
 
     private String resolveFamily(String messageType) {

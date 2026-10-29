@@ -7,18 +7,24 @@ import io.vertx.core.impl.logging.Logger;
 import io.vertx.core.impl.logging.LoggerFactory;
 import io.vertx.sqlclient.Pool;
 import io.vertx.sqlclient.Row;
+import io.vertx.sqlclient.SqlConnection;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.function.Function;
+import java.util.function.BiFunction;
 
 /**
  * Processes claimed inbox rows: CLAIMED → PROCESSING → SUCCEEDED, or FAILED_RETRYABLE with
  * exponential backoff, or FAILED_FINAL plus a manual task once retries are exhausted or the
  * failure is permanent. Every status change is fenced by the row's claim token.
+ *
+ * <p>The handler's database effects and the fenced SUCCEEDED update commit in one transaction. If
+ * the claim was lost meanwhile (the handler outlived its lock and another worker reclaimed the
+ * row), the fenced update matches nothing and the whole transaction rolls back — so business
+ * effects are applied exactly once even when two workers process the same item.
  *
  * <p>A row reclaimed after a worker crash arrives with its attempts already counted, so a message
  * that crashes the worker every time ends in FAILED_FINAL instead of looping forever.
@@ -31,10 +37,10 @@ public class InboxProcessor {
 
     private final Pool pool;
     private final InboxRepository inbox;
-    private final Function<Row, Future<Void>> handler;
+    private final BiFunction<SqlConnection, Row, Future<Void>> handler;
     private final int lockSeconds;
 
-    public InboxProcessor(Pool pool, Function<Row, Future<Void>> handler, int lockSeconds) {
+    public InboxProcessor(Pool pool, BiFunction<SqlConnection, Row, Future<Void>> handler, int lockSeconds) {
         this.pool = pool;
         this.inbox = new InboxRepository(pool);
         this.handler = handler;
@@ -66,11 +72,20 @@ public class InboxProcessor {
             if (!owned) {
                 return Future.succeededFuture(); // reclaimed by another worker meanwhile
             }
-            return handler.apply(row).transform(ar -> {
+            return pool.withTransaction(tx -> handler.apply(tx, row)
+                    .compose(v -> new InboxRepository(tx).markSucceeded(id, token))
+                    .compose(stillOwned -> stillOwned
+                        ? Future.<Void>succeededFuture()
+                        : Future.failedFuture(new LostClaimException(id))))
+                .transform(ar -> {
                 if (ar.succeeded()) {
-                    return inbox.markSucceeded(id, token).mapEmpty();
+                    return Future.<Void>succeededFuture();
                 }
                 Throwable err = ar.cause();
+                if (err instanceof LostClaimException) {
+                    log.warn("Inbox item " + id + " was reclaimed by another worker; rolled back this attempt");
+                    return Future.<Void>succeededFuture();
+                }
                 int attemptNumber = attempts + 1;
                 if (err instanceof PermanentProcessingException || attemptNumber >= maxAttempts) {
                     String code = err instanceof PermanentProcessingException ? "PERMANENT_FAILURE" : "RETRIES_EXHAUSTED";
@@ -100,5 +115,12 @@ public class InboxProcessor {
     static Duration backoff(int attemptNumber) {
         long seconds = BASE_BACKOFF.getSeconds() << Math.min(attemptNumber - 1, 20);
         return seconds >= MAX_BACKOFF.getSeconds() ? MAX_BACKOFF : Duration.ofSeconds(seconds);
+    }
+
+    /** The fenced commit found the row owned by someone else: this attempt must not take effect. */
+    private static final class LostClaimException extends RuntimeException {
+        LostClaimException(Long inboxId) {
+            super("Lost claim on inbox item " + inboxId, null, false, false);
+        }
     }
 }

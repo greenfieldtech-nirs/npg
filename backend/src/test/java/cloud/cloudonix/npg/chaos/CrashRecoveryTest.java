@@ -93,6 +93,7 @@ class CrashRecoveryTest {
         pool.query("DELETE FROM np_manual_tasks").execute()
             .compose(v -> pool.query("DELETE FROM np_timers").execute())
             .compose(v -> pool.query("DELETE FROM np_workflow_events").execute())
+            .compose(v -> pool.query("DELETE FROM np_audit_events").execute())
             .compose(v -> pool.query("DELETE FROM np_inbox").execute())
             .compose(v -> pool.query("DELETE FROM np_outbox").execute())
             .compose(v -> pool.query("DELETE FROM np_messages").execute())
@@ -155,7 +156,7 @@ class CrashRecoveryTest {
 
     @Test
     void successfulProcessingMarksSucceeded(VertxTestContext ctx) {
-        InboxProcessor processor = new InboxProcessor(pool, row -> Future.succeededFuture(), 60);
+        InboxProcessor processor = new InboxProcessor(pool, (tx, row) -> Future.succeededFuture(), 60);
         insertInboxItem(3)
             .compose(id -> inbox.claimBatch("w", 10, 60))
             .compose(processor::processAll)
@@ -171,7 +172,7 @@ class CrashRecoveryTest {
 
     @Test
     void transientHandlerFailureIsRetriedLater(VertxTestContext ctx) {
-        InboxProcessor processor = new InboxProcessor(pool, row -> Future.failedFuture("db hiccup"), 60);
+        InboxProcessor processor = new InboxProcessor(pool, (tx, row) -> Future.failedFuture("db hiccup"), 60);
         insertInboxItem(3)
             .compose(id -> inbox.claimBatch("w", 10, 60))
             .compose(processor::processAll)
@@ -197,7 +198,7 @@ class CrashRecoveryTest {
 
     @Test
     void exhaustedRetriesFailFinalWithManualTask(VertxTestContext ctx) {
-        InboxProcessor processor = new InboxProcessor(pool, row -> Future.failedFuture("still broken"), 60);
+        InboxProcessor processor = new InboxProcessor(pool, (tx, row) -> Future.failedFuture("still broken"), 60);
         insertInboxItem(2)
             .compose(id -> pool.preparedQuery("UPDATE np_inbox SET attempts = 1 WHERE id = ?").execute(Tuple.of(id)))
             .compose(v -> inbox.claimBatch("w", 10, 60))
@@ -219,7 +220,7 @@ class CrashRecoveryTest {
     @Test
     void messageThatKeepsCrashingTheWorkerEndsFinalWithoutRunningAgain(VertxTestContext ctx) {
         AtomicInteger handlerCalls = new AtomicInteger();
-        InboxProcessor processor = new InboxProcessor(pool, row -> {
+        InboxProcessor processor = new InboxProcessor(pool, (tx, row) -> {
             handlerCalls.incrementAndGet();
             return Future.succeededFuture();
         }, 60);
@@ -237,9 +238,33 @@ class CrashRecoveryTest {
     }
 
     @Test
+    void handlerEffectsRollBackWhenTheClaimWasLostMidProcessing(VertxTestContext ctx) {
+        // the handler outlives its lock: another worker takes the row over while it is still running
+        InboxProcessor slow = new InboxProcessor(pool, (tx, row) ->
+            tx.query("INSERT INTO np_audit_events (event_uuid, actor_type, action, entity_type, entity_id) "
+                    + "VALUES (UUID(), 'SYSTEM', 'SIDE_EFFECT', 'TEST', 'x')").execute()
+                .compose(v -> pool.preparedQuery("UPDATE np_inbox SET locked_by = 'other-worker' WHERE id = ?")
+                    .execute(Tuple.of(row.getLong("id"))))
+                .mapEmpty(), 60);
+        insertInboxItem(3)
+            .compose(id -> inbox.claimBatch("slow", 10, 60))
+            .compose(slow::processAll)
+            .compose(v -> pool.query("SELECT COUNT(*) AS c FROM np_audit_events WHERE action = 'SIDE_EFFECT'").execute())
+            .compose(rows -> {
+                ctx.verify(() -> assertEquals(0L, rows.iterator().next().getLong("c"), "side effect must roll back"));
+                return pool.query("SELECT status, locked_by FROM np_inbox").execute();
+            })
+            .onComplete(ctx.succeeding(rows -> ctx.verify(() -> {
+                assertEquals("other-worker", rows.iterator().next().getString("locked_by"));
+                assertNotEquals("SUCCEEDED", rows.iterator().next().getString("status"));
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
     void permanentFailureSkipsRetries(VertxTestContext ctx) {
         InboxProcessor processor = new InboxProcessor(pool,
-            row -> Future.failedFuture(new PermanentProcessingException("no handler")), 60);
+            (tx, row) -> Future.failedFuture(new PermanentProcessingException("no handler")), 60);
         insertInboxItem(5)
             .compose(id -> inbox.claimBatch("w", 10, 60))
             .compose(processor::processAll)
