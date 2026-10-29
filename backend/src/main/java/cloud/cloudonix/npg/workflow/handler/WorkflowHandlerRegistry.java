@@ -27,10 +27,10 @@ public class WorkflowHandlerRegistry {
             new PortingService(services, PortOutPolicy.fromEnvironment()));
         handlers.put(StateMachines.PORTING, porting);
         handlers.put(StateMachines.PUBLICATION, new PublicationWorkflowHandler(services, porting.publication()));
-        handlers.put(StateMachines.NUMBER_RETURN, new NumberReturnWorkflowHandler());
-        handlers.put(StateMachines.NUMBER_INQUIRY, new InquiryWorkflowHandler());
-        handlers.put(StateMachines.MAINTENANCE, new MaintenanceWorkflowHandler());
-        handlers.put(StateMachines.DATA_SYNCHRONIZATION, new SynchronizationWorkflowHandler());
+        handlers.put(StateMachines.NUMBER_RETURN, new NumberReturnWorkflowHandler(services, porting.publication()));
+        handlers.put(StateMachines.NUMBER_INQUIRY, new InquiryWorkflowHandler(services));
+        handlers.put(StateMachines.MAINTENANCE, new MaintenanceWorkflowHandler(services));
+        handlers.put(StateMachines.DATA_SYNCHRONIZATION, new SynchronizationWorkflowHandler(services));
     }
 
     public Future<Void> handle(SqlConnection tx, Row inboxItem) {

@@ -49,6 +49,22 @@ public class OutboxRepository {
             workerId, batchSize, lockSeconds);
     }
 
+    /**
+     * Puts a claimed row back without counting an attempt: its destination is down for maintenance.
+     * Marking the operator UP pulls such rows forward (OperatorStatusService).
+     */
+    public Future<Boolean> deferForOperatorDown(Long outboxId, String claimToken, LocalDateTime retryAt) {
+        return sqlClient.preparedQuery("""
+                UPDATE np_outbox
+                SET status = 'PENDING', due_at = ?, locked_by = NULL, locked_until = NULL,
+                    last_error_code = 'OPERATOR_DOWN', last_error_message = 'Destination operator is down for maintenance',
+                    updated_at = UTC_TIMESTAMP(6)
+                WHERE id = ? AND locked_by = ? AND status = 'CLAIMED'
+                """)
+            .execute(Tuple.of(retryAt, outboxId, claimToken))
+            .map(rs -> rs.rowCount() == 1);
+    }
+
     /** CLAIMED → SENDING immediately before the network call; the lock bounds the send window. */
     public Future<Boolean> markSending(Long outboxId, String claimToken, int lockSeconds) {
         return sqlClient.preparedQuery("""

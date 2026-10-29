@@ -51,7 +51,11 @@ public class PublicationWorkflowHandler implements WorkflowHandler {
             });
     }
 
-    /** Another operator announces that it now serves a number (port) or returned it (return). */
+    /**
+     * Another operator announces that it now serves a number (port) or returned it (return).
+     * Applied only if it agrees with what we recorded: a peer cannot redirect a number by simply
+     * claiming it — the previous owner always comes from our database, under a row lock.
+     */
     private Future<Void> onPublish(SqlConnection tx, InboundMessage publish) {
         String phone = publish.body().getString("phoneNumber");
         if (phone == null) {
@@ -60,66 +64,113 @@ public class PublicationWorkflowHandler implements WorkflowHandler {
         }
         return engine.findForUpdate(tx, publish.requestId(), StateMachines.PUBLICATION, StateMachines.OBSERVER,
                 publish.senderOperatorId())
-            .compose(existing -> {
-                if (existing != null) {
-                    return engine.recordEvent(tx, existing, "DUPLICATE_PUBLISH_IGNORED", publish.messageId(), null, "system");
-                }
-                boolean isReturn = "Return".equalsIgnoreCase(publish.body().getString("publishType"));
-                // a port: the publisher now serves the number; a return: it goes back to its original operator
-                String newOwnerCode = isReturn ? publish.body().getString("originalOperator") : null;
-                return services.operators().byCode(tx, publish.body().getString("donor"))
-                    .compose(donor -> services.operators().byCode(tx, newOwnerCode).compose(returnedTo -> {
-                        Long newOwner = isReturn ? (returnedTo != null ? returnedTo.id() : null) : publish.senderOperatorId();
-                        Long previous = isReturn ? publish.senderOperatorId() : (donor != null ? donor.id() : null);
-                        return engine.create(tx, new WorkflowEngine.NewWorkflow(StateMachines.PUBLICATION,
-                                StateMachines.OBSERVER, publish.senderOperatorId(), publish.requestId(), phone,
-                                publish.senderOperatorId(), donor != null ? donor.id() : null, null, null,
-                                new JsonObject().put("publishType", publish.body().getString("publishType"))
-                                    .put("previousOperatorId", previous), null), "system")
-                            .compose(wf -> newOwner == null
-                                ? reject(tx, wf, publish, "Unknown operator in the publication")
-                                : apply(tx, wf, publish, phone, newOwner, previous, isReturn));
+            .compose(existing -> existing != null
+                ? engine.recordEvent(tx, existing, "DUPLICATE_PUBLISH_IGNORED", publish.messageId(), null, "system")
+                : Future.all(services.operators().local(tx), services.operators().byCode(tx, publish.body().getString("donor")),
+                        services.operators().byCode(tx, publish.body().getString("originalOperator")),
+                        NumberOwnershipService.lockOwnership(tx, phone))
+                    .compose(all -> {
+                        cloud.cloudonix.npg.domain.Operator local = all.resultAt(0);
+                        cloud.cloudonix.npg.domain.Operator donor = all.resultAt(1);
+                        cloud.cloudonix.npg.domain.Operator original = all.resultAt(2);
+                        NumberOwnershipService.Ownership recorded = all.resultAt(3);
+                        boolean isReturn = "Return".equalsIgnoreCase(publish.body().getString("publishType"));
+                        return engine.create(tx, new WorkflowEngine.NewWorkflow(StateMachines.PUBLICATION, StateMachines.OBSERVER,
+                                publish.senderOperatorId(), publish.requestId(), phone, publish.senderOperatorId(),
+                                donor != null ? donor.id() : null, null, null,
+                                new JsonObject().put("publishType", publish.body().getString("publishType")), null), "system")
+                            .compose(wf -> isReturn
+                                ? applyReturn(tx, wf, publish, phone, local, original, recorded)
+                                : applyPort(tx, wf, publish, phone, local, donor, recorded));
                     }));
-            });
+    }
+
+    private Future<Void> applyPort(SqlConnection tx, Workflow wf, InboundMessage publish, String phone,
+                                   cloud.cloudonix.npg.domain.Operator local, cloud.cloudonix.npg.domain.Operator donor,
+                                   NumberOwnershipService.Ownership recorded) {
+        Long publisher = publish.senderOperatorId();
+        Long owner = recorded != null ? recorded.currentOperatorId() : null;
+        if (owner != null && owner.equals(local.id())) {
+            // our own number: only a port-out we completed to this publisher explains it — and that
+            // already moved the routing, so a Publish claiming a number we still serve is refused
+            return refuse(tx, wf, publish, "This operator still serves the number; no completed port-out to the publisher");
+        }
+        if (owner != null && donor != null && !owner.equals(donor.id()) && !owner.equals(publisher)) {
+            return refuse(tx, wf, publish, "The named donor does not match the operator recorded as serving the number");
+        }
+        Long previous = owner != null ? owner : (donor != null ? donor.id() : null);
+        return apply(tx, wf, publish, phone, publisher, previous, false);
+    }
+
+    private Future<Void> applyReturn(SqlConnection tx, Workflow wf, InboundMessage publish, String phone,
+                                     cloud.cloudonix.npg.domain.Operator local, cloud.cloudonix.npg.domain.Operator original,
+                                     NumberOwnershipService.Ownership recorded) {
+        if (original == null) {
+            return refuse(tx, wf, publish, "Unknown original operator in the return publication");
+        }
+        if (recorded != null && recorded.currentOperatorId() != null && !recorded.currentOperatorId().equals(publish.senderOperatorId())) {
+            return refuse(tx, wf, publish, "Only the operator serving a number can publish its return");
+        }
+        if (recorded != null && recorded.originalOperatorId() != null && !recorded.originalOperatorId().equals(original.id())) {
+            return refuse(tx, wf, publish, "The named original operator does not match our records");
+        }
+        return apply(tx, wf, publish, phone, original.id(), publish.senderOperatorId(), true);
     }
 
     private Future<Void> apply(SqlConnection tx, Workflow wf, InboundMessage publish, String phone, Long newOwner,
                                Long previous, boolean isReturn) {
-        return NumberOwnershipService.transfer(tx, phone, numberType(publish), newOwner, previous,
-                isReturn ? "RETURNED" : "PORTED", isReturn ? "RETURN_PUBLISHED" : "PORT_PUBLISHED", wf.id(), publish.messageId())
-            .compose(v -> support.respond(tx, wf, publish, "Publish_response", PROCESS,
-                ProtocolBodies.approve(publish.trxNo(), new JsonObject().put("routeDateTime", ProtocolBodies.localNow()))))
-            .compose(messageId -> engine.transition(tx, wf, "PUBLICATION_APPLIED", "PUBLICATION_APPLIED", publish.messageId(),
-                new JsonObject().put("newOperatorId", newOwner), "system"))
+        return engine.mergeContext(tx, wf, new JsonObject().put("previousOperatorId", previous))
+            .compose(updated -> NumberOwnershipService.transfer(tx, phone, numberType(publish), newOwner, previous,
+                    isReturn ? "RETURNED" : "PORTED", isReturn ? "RETURN_PUBLISHED" : "PORT_PUBLISHED", wf.id(), publish.messageId())
+                .compose(v -> support.respond(tx, updated, publish, "Publish_response", PROCESS,
+                    ProtocolBodies.approve(publish.trxNo(), new JsonObject().put("routeDateTime", ProtocolBodies.localNow()))))
+                .compose(messageId -> engine.transition(tx, updated, "PUBLICATION_APPLIED", "PUBLICATION_APPLIED",
+                    publish.messageId(), new JsonObject().put("newOperatorId", newOwner), "system")))
             .mapEmpty();
     }
 
-    private Future<Void> reject(SqlConnection tx, Workflow wf, InboundMessage publish, String reason) {
+    /** Refuses a publication that contradicts our records, and tells the NOC. */
+    private Future<Void> refuse(SqlConnection tx, Workflow wf, InboundMessage publish, String reason) {
         return support.respond(tx, wf, publish, "Publish_response", PROCESS,
                 ProtocolBodies.reject(publish.trxNo(), "REJECTED_OTHER", reason))
             .compose(messageId -> engine.transition(tx, wf, "PUBLICATION_REJECTED", "PUBLICATION_REJECTED",
                 publish.messageId(), new JsonObject().put("reason", reason), "system"))
+            .compose(rejected -> support.task(tx, rejected, publish.messageId(), "PUBLICATION_CONFLICT",
+                cloud.cloudonix.npg.repository.ManualTaskRepository.SEVERITY_HIGH,
+                "Refused a Publish for " + wf.phoneNumber() + ": " + reason + ". Verify with the publisher."))
             .mapEmpty();
     }
 
-    /** The publisher withdraws an earlier publication: restore the previous routing. */
+    /** The publisher withdraws an earlier publication: restore the routing we recorded before it. */
     private Future<Void> onCancelPublish(SqlConnection tx, InboundMessage cancel) {
         return engine.findForUpdate(tx, cancel.requestId(), StateMachines.PUBLICATION, StateMachines.OBSERVER,
                 cancel.senderOperatorId())
             .compose(wf -> {
                 if (wf == null || !"PUBLICATION_APPLIED".equals(wf.state())) {
-                    return support.respond(tx, wf, cancel, "Cancel_Publish_response", PROCESS, ProtocolBodies.reject(
-                        cancel.trxNo(), "REJECTED_OTHER", "No applied publication for this request")).mapEmpty();
+                    return rejectCancel(tx, wf, cancel, "No applied publication for this request");
                 }
-                Long previous = wf.context().getLong("previousOperatorId");
-                return NumberOwnershipService.transfer(tx, wf.phoneNumber(), null, previous, "PORTED",
-                        "PUBLICATION_CANCELLED", wf.id(), cancel.messageId())
-                    .compose(v -> support.respond(tx, wf, cancel, "Cancel_Publish_response", PROCESS,
-                        ProtocolBodies.approve(cancel.trxNo(), null)))
-                    .compose(messageId -> engine.transition(tx, wf, "PUBLICATION_CANCELLED", "PUBLICATION_CANCELLED",
-                        cancel.messageId(), null, "system"))
-                    .mapEmpty();
+                return NumberOwnershipService.lockOwnership(tx, wf.phoneNumber()).compose(recorded -> {
+                    Long publishedOwner = wf.context().getLong("newOperatorId", cancel.senderOperatorId());
+                    if (recorded == null || recorded.currentOperatorId() == null
+                        || !recorded.currentOperatorId().equals(cancel.senderOperatorId())) {
+                        return rejectCancel(tx, wf, cancel, "The number has moved on since this publication");
+                    }
+                    Long previous = wf.context().getLong("previousOperatorId");
+                    return NumberOwnershipService.transfer(tx, wf.phoneNumber(), null, previous, "PORTED",
+                            "PUBLICATION_CANCELLED", wf.id(), cancel.messageId())
+                        .compose(v -> support.respond(tx, wf, cancel, "Cancel_Publish_response", PROCESS,
+                            ProtocolBodies.approve(cancel.trxNo(), null)))
+                        .compose(messageId -> engine.transition(tx, wf, "PUBLICATION_CANCELLED", "PUBLICATION_CANCELLED",
+                            cancel.messageId(), new JsonObject().put("restoredOperatorId", previous)
+                                .put("withdrawnOperatorId", publishedOwner), "system"))
+                        .mapEmpty();
+                });
             });
+    }
+
+    private Future<Void> rejectCancel(SqlConnection tx, Workflow wf, InboundMessage cancel, String reason) {
+        return support.respond(tx, wf, cancel, "Cancel_Publish_response", PROCESS,
+            ProtocolBodies.reject(cancel.trxNo(), "REJECTED_OTHER", reason)).mapEmpty();
     }
 
     private static String numberType(InboundMessage message) {

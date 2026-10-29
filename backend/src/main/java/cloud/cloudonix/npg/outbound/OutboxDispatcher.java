@@ -66,6 +66,23 @@ public class OutboxDispatcher {
     Future<Void> dispatchOne(Row row) {
         Long id = row.getLong("id");
         String token = row.getString("locked_by");
+        return destinationDown(row).compose(down -> down
+            ? outbox.deferForOperatorDown(id, token, java.time.LocalDateTime.now(java.time.ZoneOffset.UTC).plusMinutes(5)).mapEmpty()
+            : send(row, id, token));
+    }
+
+    /** Peers announce maintenance with Down_system; hold their traffic (maintenance messages still go). */
+    private Future<Boolean> destinationDown(Row row) {
+        String type = row.getString("item_type");
+        if ("Down_system".equals(type) || "Up_system".equals(type)) {
+            return Future.succeededFuture(false);
+        }
+        return pool.preparedQuery("SELECT availability_status FROM np_operators WHERE id = ?")
+            .execute(Tuple.of(row.getLong("destination_operator_id")))
+            .map(rows -> rows.iterator().hasNext() && "DOWN".equals(rows.iterator().next().getString("availability_status")));
+    }
+
+    private Future<Void> send(Row row, Long id, String token) {
         return outbox.markSending(id, token, lockSeconds).compose(owned -> {
             if (!owned) {
                 return Future.succeededFuture();

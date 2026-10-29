@@ -507,15 +507,27 @@ public class PortingService {
                     "REJECTED_OTHER", "No scheduled port for this request")).mapEmpty();
             }
             LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
-            return services.operators().local(tx)
-                .compose(local -> NumberOwnershipService.transfer(tx, wf.phoneNumber(), wf.context().getString("numberType"),
-                    execute.senderOperatorId(), local.id(), "PORTED", "PORT_OUT", wf.id(), execute.messageId()))
+            return services.operators().local(tx).compose(local -> NumberOwnershipService.lockOwnership(tx, wf.phoneNumber())
+                .compose(recorded -> {
+                    // re-check under the row lock: the number may have moved since the Check was approved
+                    if (recorded != null && recorded.currentOperatorId() != null && !recorded.currentOperatorId().equals(local.id())) {
+                        return support.respond(tx, wf, execute, "Execute_response", PROCESS, ProtocolBodies.reject(execute.trxNo(),
+                                "REJECTED_NUMBER_NOT_FOUND", "The number is no longer served by this operator"))
+                            .compose(m -> support.escalate(tx, wf, execute.messageId(), "PORT_OUT_OWNERSHIP_CHANGED",
+                                "Execute for " + wf.phoneNumber() + " refused: the number is no longer ours."))
+                            .<Void>mapEmpty()
+                            .compose(v -> Future.failedFuture(new AlreadyAnswered()));
+                    }
+                    return NumberOwnershipService.transfer(tx, wf.phoneNumber(), wf.context().getString("numberType"),
+                        execute.senderOperatorId(), local.id(), "PORTED", "PORT_OUT", wf.id(), execute.messageId());
+                }))
                 .compose(v -> support.respond(tx, wf, execute, "Execute_response", PROCESS, ProtocolBodies.approve(execute.trxNo(),
                     new JsonObject().put("disconnectDateTime", ProtocolBodies.timestamp(now)))))
                 .compose(messageId -> engine.update(tx, wf, Map.of("executed_at", now,
                         "current_operator_id", execute.senderOperatorId()))
                     .compose(v -> engine.transition(tx, wf, "COMPLETED", "PORT_OUT_EXECUTED", execute.messageId(), null, "system")))
-                .mapEmpty();
+                .<Void>mapEmpty()
+                .recover(err -> err instanceof AlreadyAnswered ? Future.succeededFuture() : Future.failedFuture(err));
         });
     }
 
@@ -607,5 +619,12 @@ public class PortingService {
 
     private static <T> T firstNonNull(T a, T b) {
         return a != null ? a : b;
+    }
+
+    /** Short-circuit marker: the request was already answered (and escalated) inside the chain. */
+    private static final class AlreadyAnswered extends RuntimeException {
+        AlreadyAnswered() {
+            super(null, null, false, false);
+        }
     }
 }
