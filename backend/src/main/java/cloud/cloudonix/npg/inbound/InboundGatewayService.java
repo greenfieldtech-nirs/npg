@@ -17,10 +17,12 @@ import cloud.cloudonix.npg.xml.XmlParseResult;
 import io.vertx.core.Future;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
+import io.vertx.mysqlclient.MySQLException;
 import io.vertx.sqlclient.Pool;
 import io.vertx.sqlclient.SqlClient;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -71,14 +73,31 @@ public class InboundGatewayService {
 
         String idempotencyKey = header.buildIdempotencyKey();
 
+        return acceptDurably(header, rawXml, transport, idempotencyKey)
+            // two identical messages racing past the duplicate check: the unique key decides, and
+            // the loser gets the same duplicate NACK instead of an internal error
+            .recover(err -> isDuplicateKey(err)
+                ? Future.succeededFuture(duplicateNack(header))
+                : Future.failedFuture(err));
+    }
+
+    private static TechnicalAck duplicateNack(ProtocolHeader header) {
+        return AckNackBuilder.nack(header, "NACK_DUPLICATE_MESSAGE", null, "Duplicate idempotency key", "IDEMPOTENCY", true);
+    }
+
+    static boolean isDuplicateKey(Throwable err) {
+        return err instanceof MySQLException mysql && mysql.getErrorCode() == 1062; // ER_DUP_ENTRY
+    }
+
+    private Future<TechnicalAck> acceptDurably(ProtocolHeader header, String rawXml, XmlTransportMetadata transport,
+                                               String idempotencyKey) {
         return pool.withTransaction(tx -> {
             MessageRepository txMessageRepo = new MessageRepository(tx);
             InboxRepository txInboxRepo = new InboxRepository(tx);
             return txMessageRepo.findByIdempotencyKey(idempotencyKey)
                 .compose(existing -> {
                     if (existing.size() > 0) {
-                        return Future.succeededFuture(AckNackBuilder.nack(header, "NACK_DUPLICATE_MESSAGE",
-                            null, "Duplicate idempotency key", "IDEMPOTENCY", true));
+                        return Future.succeededFuture(duplicateNack(header));
                     }
                     String messageUuid = UUID.randomUUID().toString();
                     return ensureOperatorsExist(tx, header)
@@ -91,7 +110,7 @@ public class InboundGatewayService {
                                 header.correlationId(), idempotencyKey, mongoDocId,
                                 XmlAuditService.sha256(rawXml), header.protocolVersion()))
                         .compose(messageId -> txInboxRepo.createInboxItem(messageId, null,
-                                header.messageType(), LocalDateTime.now(), 100, 3)
+                                header.messageType(), LocalDateTime.now(ZoneOffset.UTC), 100, 5)
                             .map(inboxId -> AckNackBuilder.ack(header))));
                 });
         });
