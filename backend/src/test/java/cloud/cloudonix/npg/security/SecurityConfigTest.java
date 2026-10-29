@@ -82,17 +82,59 @@ class SecurityConfigTest {
     }
 
     @Test
-    void loginThrottleLocksAfterMaxFailuresAndExpires() {
+    void loginThrottleLocksAfterMaxAttemptsAndExpires() {
         MutableClock clock = new MutableClock();
         LoginThrottle throttle = new LoginThrottle(3, Duration.ofMinutes(5), clock);
         for (int i = 0; i < 3; i++) {
-            assertFalse(throttle.isLocked("u|ip"));
-            throttle.recordFailure("u|ip");
+            assertTrue(throttle.tryAcquire("u|ip"));
         }
-        assertTrue(throttle.isLocked("u|ip"));
-        assertFalse(throttle.isLocked("other|ip"));
+        assertFalse(throttle.tryAcquire("u|ip"));
+        assertTrue(throttle.tryAcquire("other|ip"));
         clock.advance(Duration.ofMinutes(6));
-        assertFalse(throttle.isLocked("u|ip"));
+        assertTrue(throttle.tryAcquire("u|ip"));
+    }
+
+    @Test
+    void loginThrottleResetReturnsSlots() {
+        LoginThrottle throttle = new LoginThrottle(2, Duration.ofMinutes(5), new MutableClock());
+        assertTrue(throttle.tryAcquire("k"));
+        assertTrue(throttle.tryAcquire("k"));
+        assertFalse(throttle.tryAcquire("k"));
+        throttle.reset("k");
+        assertTrue(throttle.tryAcquire("k"));
+    }
+
+    @Test
+    void loginThrottleCountsConcurrentInFlightAttempts() throws Exception {
+        LoginThrottle throttle = new LoginThrottle(5, Duration.ofMinutes(5), Clock.systemUTC());
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(16);
+        java.util.concurrent.CountDownLatch start = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicInteger granted = new java.util.concurrent.atomic.AtomicInteger();
+        java.util.List<java.util.concurrent.Future<?>> futures = new java.util.ArrayList<>();
+        for (int i = 0; i < 100; i++) {
+            futures.add(pool.submit(() -> {
+                start.await();
+                if (throttle.tryAcquire("victim|ip")) {
+                    granted.incrementAndGet();
+                }
+                return null;
+            }));
+        }
+        start.countDown();
+        for (java.util.concurrent.Future<?> f : futures) {
+            f.get();
+        }
+        pool.shutdown();
+        assertEquals(5, granted.get());
+    }
+
+    @Test
+    void loginThrottleMemoryIsBounded() {
+        LoginThrottle throttle = new LoginThrottle(5, Duration.ofMinutes(5), new MutableClock(), 100);
+        for (int i = 0; i < 10_000; i++) {
+            throttle.tryAcquire("spray-" + i);
+        }
+        assertTrue(throttle.trackedKeys() <= 100, "tracked " + throttle.trackedKeys());
     }
 
     @Test

@@ -829,6 +829,23 @@ class ManagementApiTest {
             })));
     }
 
+    @Test
+    void throttleCannotBeBypassedWithCaseOrWhitespaceVariants(VertxTestContext ctx) {
+        String[] variants = {"Sprayed", "SPRAYED", "sprayed ", " sprayed", "sPrAyEd"};
+        Future<Integer> chain = seedUser("sprayed", "correct-password", "USER").map(0);
+        for (String variant : variants) {
+            chain = chain.compose(x -> webClient.post("/api/auth/login")
+                .sendJsonObject(new JsonObject().put("username", variant).put("password", "wrong"))
+                .map(r -> r.statusCode()));
+        }
+        chain.compose(last -> webClient.post("/api/auth/login")
+                .sendJsonObject(new JsonObject().put("username", "sprayed").put("password", "correct-password")))
+            .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
+                assertEquals(429, resp.statusCode(), resp.bodyAsString());
+                ctx.completeNow();
+            })));
+    }
+
     /** Real signed token for the seeded ADMIN user — the API re-checks the user in the DB. */
     private static String adminAuth() {
         return bearer(TEST_ADMIN, "ADMIN");

@@ -3,7 +3,6 @@ package cloud.cloudonix.npg.api;
 import cloud.cloudonix.npg.config.Env;
 import cloud.cloudonix.npg.api.security.JwtAuthHandler;
 import cloud.cloudonix.npg.security.JwtService;
-import cloud.cloudonix.npg.security.LoginThrottle;
 import cloud.cloudonix.npg.security.UserRepository;
 import cloud.cloudonix.npg.audit.XmlAuditService;
 import cloud.cloudonix.npg.config.DatabaseConfig;
@@ -59,7 +58,7 @@ public class ManagementApiVerticle extends AbstractVerticle {
                 PubSubService pubSubService = new PubSubService(vertx, redisFuture.result());
                 JwtService jwt = JwtService.fromEnvironment();
                 guard = new JwtAuthHandler.Guard(jwt, new UserRepository(pool));
-                authApiHandler = new AuthApiHandler(pool, jwt, new LoginThrottle());
+                authApiHandler = new AuthApiHandler(pool, jwt);
                 dashboardApiHandler = new DashboardApiHandler(pool);
                 workflowApiHandler = new WorkflowApiHandler(pool);
                 messageApiHandler = new MessageApiHandler(pool, xmlAuditService,

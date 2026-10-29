@@ -4,59 +4,89 @@ import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Brute-force brake for the login endpoint: after {@code maxFailures} failed attempts for the
- * same key (username|ip) within {@code window}, further attempts are refused until the oldest
- * failure ages out. Per-process and non-durable by design — losing it on restart only resets
- * the brake, it never affects correctness.
+ * Brute-force brake for the login endpoint. Each attempt must first reserve a slot with
+ * {@link #tryAcquire}; the slot is only given back by {@link #reset} on a successful login, so
+ * concurrent in-flight guesses count against the limit too (no check-then-record race).
+ *
+ * <p>Per-process and non-durable by design — a restart only resets the brake, never affects
+ * correctness. Memory is bounded: empty entries are dropped and, past {@code maxKeys}, the
+ * least-recently-touched keys are evicted.
  */
 public class LoginThrottle {
 
-    private final int maxFailures;
+    static final int DEFAULT_MAX_KEYS = 50_000;
+
+    private final int maxAttempts;
     private final Duration window;
     private final Clock clock;
-    private final Map<String, Deque<Long>> failures = new ConcurrentHashMap<>();
+    private final int maxKeys;
+    // access-ordered so eviction removes the least recently touched key first
+    private final LinkedHashMap<String, Deque<Long>> attempts = new LinkedHashMap<>(256, 0.75f, true);
 
-    public LoginThrottle(int maxFailures, Duration window, Clock clock) {
-        this.maxFailures = maxFailures;
+    public LoginThrottle(int maxAttempts, Duration window, Clock clock, int maxKeys) {
+        this.maxAttempts = maxAttempts;
         this.window = window;
         this.clock = clock;
+        this.maxKeys = maxKeys;
     }
 
-    public LoginThrottle() {
-        this(5, Duration.ofMinutes(5), Clock.systemUTC());
+    public LoginThrottle(int maxAttempts, Duration window, Clock clock) {
+        this(maxAttempts, window, clock, DEFAULT_MAX_KEYS);
     }
 
-    public boolean isLocked(String key) {
-        Deque<Long> attempts = failures.get(key);
-        if (attempts == null) {
+    /**
+     * Reserves an attempt for {@code key}. Returns false (and reserves nothing) when the key
+     * already used {@code maxAttempts} within the window.
+     */
+    public synchronized boolean tryAcquire(String key) {
+        Deque<Long> recent = attempts.computeIfAbsent(key, k -> new ArrayDeque<>());
+        prune(recent);
+        if (recent.size() >= maxAttempts) {
             return false;
         }
-        synchronized (attempts) {
-            prune(attempts);
-            return attempts.size() >= maxFailures;
-        }
+        recent.addLast(clock.millis());
+        evictIfNeeded();
+        return true;
     }
 
-    public void recordFailure(String key) {
-        Deque<Long> attempts = failures.computeIfAbsent(key, k -> new ArrayDeque<>());
-        synchronized (attempts) {
-            prune(attempts);
-            attempts.addLast(clock.millis());
-        }
+    /** Clears the key after a successful login, returning its reserved slot. */
+    public synchronized void reset(String key) {
+        attempts.remove(key);
     }
 
-    public void reset(String key) {
-        failures.remove(key);
+    synchronized int trackedKeys() {
+        return attempts.size();
     }
 
-    private void prune(Deque<Long> attempts) {
+    private void prune(Deque<Long> recent) {
         long cutoff = clock.millis() - window.toMillis();
-        while (!attempts.isEmpty() && attempts.peekFirst() < cutoff) {
-            attempts.removeFirst();
+        while (!recent.isEmpty() && recent.peekFirst() < cutoff) {
+            recent.removeFirst();
+        }
+    }
+
+    private void evictIfNeeded() {
+        if (attempts.size() <= maxKeys) {
+            return;
+        }
+        // first drop entries whose attempts all aged out, then the least recently touched
+        Iterator<Map.Entry<String, Deque<Long>>> it = attempts.entrySet().iterator();
+        while (it.hasNext() && attempts.size() > maxKeys) {
+            Map.Entry<String, Deque<Long>> entry = it.next();
+            prune(entry.getValue());
+            if (entry.getValue().isEmpty()) {
+                it.remove();
+            }
+        }
+        it = attempts.entrySet().iterator();
+        while (it.hasNext() && attempts.size() > maxKeys) {
+            it.next();
+            it.remove();
         }
     }
 }
