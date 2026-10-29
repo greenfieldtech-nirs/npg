@@ -39,11 +39,11 @@ public record TechnicalAck(TechnicalAckStatus status, String ackId, String corre
     public String toXml() {
         StringBuilder sb = new StringBuilder();
         sb.append("\u003cAckNack\u003e");
-        sb.append("\u003cStatus\u003e").append(status.name()).append("\u003c/Status\u003e");
-        sb.append("\u003cAckId\u003e").append(ackId).append("\u003c/AckId\u003e");
-        sb.append("\u003cCorrelationId\u003e").append(correlationId).append("\u003c/CorrelationId\u003e");
-        sb.append("\u003cOriginalTransactionId\u003e").append(originalTransactionId).append("\u003c/OriginalTransactionId\u003e");
-        sb.append("\u003cTimestamp\u003e").append(timestamp.toString()).append("\u003c/Timestamp\u003e");
+        sb.append("\u003cStatus\u003e").append(escapeXml(status.name())).append("\u003c/Status\u003e");
+        sb.append("\u003cAckId\u003e").append(escapeXml(ackId)).append("\u003c/AckId\u003e");
+        sb.append("\u003cCorrelationId\u003e").append(escapeXml(correlationId)).append("\u003c/CorrelationId\u003e");
+        sb.append("\u003cOriginalTransactionId\u003e").append(escapeXml(originalTransactionId)).append("\u003c/OriginalTransactionId\u003e");
+        sb.append("\u003cTimestamp\u003e").append(escapeXml(timestamp.toString())).append("\u003c/Timestamp\u003e");
         if (nackReason != null) {
             sb.append("\u003cNackReason\u003e");
             sb.append("\u003cCode\u003e").append(escapeXml(nackReason.code())).append("\u003c/Code\u003e");
@@ -54,7 +54,7 @@ public record TechnicalAck(TechnicalAckStatus status, String ackId, String corre
         return sb.toString();
     }
 
-    private String escapeXml(String value) {
+    private static String escapeXml(String value) {
         if (value == null) return "";
         return value.replace("&", "&amp;")
             .replace("<", "&lt;")
