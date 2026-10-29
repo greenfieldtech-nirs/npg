@@ -132,8 +132,9 @@ public class InboundGatewayService {
                                 operatorIds.get(header.receiverOperator()), header.requestId(), header.transactionId(),
                                 header.correlationId(), idempotencyKey, mongoDocId,
                                 XmlAuditService.sha256(rawXml), header.protocolVersion()))
-                        .compose(messageId -> txInboxRepo.createInboxItem(messageId, null,
-                                header.messageType(), null, 100, 5)
+                        .compose(messageId -> txInboxRepo.createInboxItem(messageId, null, header.messageType(),
+                                InboxRepository.orderingKey(operatorIds.get(header.senderOperator()), header.requestId()),
+                                null, 100, 5)
                             .map(inboxId -> AckNackBuilder.ack(header))));
                 });
         });

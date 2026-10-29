@@ -8,6 +8,10 @@ ENDPOINT="${ENDPOINT:-http://localhost:18081/np/inbound}"
 # unique per run, so a replay never collides with an earlier one
 REQUEST_ID="${REQUEST_ID:-NPHLBZ$(date -u +%y%m%d%H%M%S)$((RANDOM % 1000))}"
 FIXTURES="backend/src/test/resources/simulation"
+# the recorded port time is in the past; a real recipient asks for a time a few minutes ahead
+PORT_TIME="${PORT_TIME:-$(TZ=Asia/Jerusalem date -v+2M +%Y-%m-%dT%H:%M:%S%z 2>/dev/null \
+    || TZ=Asia/Jerusalem date -d '+2 minutes' +%Y-%m-%dT%H:%M:%S%z)}"
+PORT_TIME="${PORT_TIME:0:22}:${PORT_TIME:22}"
 
 post() {
     local file="$1" from="$2" to="$3" type="$4" trx="$5"
@@ -21,7 +25,7 @@ post() {
         -H "X-NP-TRX-NO: $trx" \
         -H "X-NP-VERSION-NO: 1" \
         -H "X-NP-PROCESS-TYPE: PORT" \
-        --data-binary @"$FIXTURES/$file")
+        --data-binary "$(sed "s#<portingDateTime>[^<]*#<portingDateTime>$PORT_TIME#" "$FIXTURES/$file")")
     local status
     status=$(echo "$response" | grep -o '<Status>[^<]*' | sed 's/<Status>//')
     echo "$type ($from -> $to, trx $trx): $status"

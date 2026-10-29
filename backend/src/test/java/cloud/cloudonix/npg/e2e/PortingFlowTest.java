@@ -355,6 +355,38 @@ class PortingFlowTest {
     }
 
     @Test
+    void aBurstOfOneProcessIsHandledInArrivalOrder(VertxTestContext ctx) {
+        // as in the live trace: Check, Request and Execute arrive before any of them is processed
+        String requestId = "NPP1LOC261030000000099";
+        auto.accept("P1", "Check", requestId, ProtocolHarness.checkBody(PHONE))
+            .compose(a -> auto.accept("P1", "Request", requestId, "<portingDateTime>"
+                + java.time.OffsetDateTime.now().plusMinutes(5).withNano(0) + "</portingDateTime>"))
+            .compose(a -> auto.accept("P1", "Execute", requestId, ""))
+            .compose(a -> auto.processInbox())
+            .compose(v -> auto.workflow(requestId))
+            .compose(wf -> {
+                ctx.verify(() -> assertEquals("COMPLETED", wf.getString("current_state")));
+                return auto.count("SELECT COUNT(*) FROM np_messages WHERE direction = 'OUTBOUND' AND message_type IN "
+                    + "('Check_response', 'Request_response', 'Execute_response') AND xml_sha256 IS NOT NULL");
+            })
+            .compose(responses -> {
+                ctx.verify(() -> assertEquals(3L, responses, "every message answered, none against a stale state"));
+                // the publisher then announces the port to us as well
+                return auto.accept("P1", "Publish", requestId, "<donor>LOC</donor><publishType>Port</publishType>"
+                        + "<fixed><fixedNumberSingle><numberType>S</numberType><number>" + PHONE + "</number></fixedNumberSingle></fixed>")
+                    .compose(a -> auto.processInbox());
+            })
+            .compose(v -> auto.number(PHONE))
+            .onComplete(ctx.succeeding(number -> ctx.verify(() -> {
+                assertEquals("P1", number.getString("current_code"));
+                assertEquals("LOC", number.getString("original_code"));
+                assertNotEquals(number.getLong("current_operator_id"), number.getLong("previous_operator_id"),
+                    "re-announcing the current owner keeps the real previous owner");
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
     void portOutOfANumberServedElsewhereIsRejected(VertxTestContext ctx) {
         String requestId = "NPP1LOC261030000000002";
         auto.operatorId("P2")

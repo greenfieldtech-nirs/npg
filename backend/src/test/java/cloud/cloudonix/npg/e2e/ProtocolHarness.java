@@ -84,6 +84,11 @@ public class ProtocolHarness {
 
     /** Delivers a message from {@code from} to LOC and runs business processing; returns the ACK. */
     public Future<TechnicalAck> deliver(String from, String type, String requestId, String bodyXml) {
+        return accept(from, type, requestId, bodyXml).compose(ack -> processInbox().map(ack));
+    }
+
+    /** Only the gateway part: the message is ACKed and queued, nothing is processed yet. */
+    public Future<TechnicalAck> accept(String from, String type, String requestId, String bodyXml) {
         Map<String, String> headers = new HashMap<>();
         headers.put("x-np-from", from);
         headers.put("x-np-to", "LOC");
@@ -92,7 +97,7 @@ public class ProtocolHarness {
         String xml = "<npMessageBody><" + type + ">" + bodyXml + "</" + type + "></npMessageBody>";
         return gateway.receive(xml, new XmlTransportMetadata("HTTPS", "10.0.0.1", null, new JsonObject()), headers)
             .compose(ack -> ack.status() == cloud.cloudonix.npg.acknack.TechnicalAckStatus.ACK
-                ? processInbox().map(ack)
+                ? Future.succeededFuture(ack)
                 : Future.failedFuture("Gateway NACKed " + type + ": " + ack.nackReason()));
     }
 
@@ -109,7 +114,7 @@ public class ProtocolHarness {
 
     /** Processes everything claimable, then fails if an accepted message is still waiting. */
     public Future<Void> processInbox() {
-        return new InboxRepository(pool).claimBatch("harness", 50, 60).compose(inboxProcessor::processAll)
+        return drainInbox(20)
             .compose(v -> pool.query("SELECT id, item_type, status, due_at, UTC_TIMESTAMP(6) AS db_now FROM np_inbox "
                 + "WHERE status IN ('PENDING', 'CLAIMED', 'PROCESSING')").execute())
             .compose(rows -> {
@@ -120,6 +125,13 @@ public class ProtocolHarness {
                 return Future.failedFuture("Inbox item left unprocessed: " + r.getString("item_type") + " " + r.getString("status")
                     + " due " + r.getLocalDateTime("due_at") + " (db now " + r.getLocalDateTime("db_now") + ")");
             });
+    }
+
+    /** Claims and processes until nothing is claimable (one message per process per round). */
+    private Future<Void> drainInbox(int roundsLeft) {
+        return new InboxRepository(pool).claimBatch("harness", 50, 60).compose(rows -> rows.size() == 0 || roundsLeft == 0
+            ? Future.succeededFuture()
+            : inboxProcessor.processAll(rows).compose(v -> drainInbox(roundsLeft - 1)));
     }
 
     /** Makes the named pending timers due and fires them. */

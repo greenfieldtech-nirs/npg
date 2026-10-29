@@ -53,10 +53,11 @@ public class NumberOwnershipService {
                 if (rows.iterator().hasNext()) {
                     Row row = rows.iterator().next();
                     previousOperatorId.set(row.getLong("current_operator_id"));
-                    return tx.preparedQuery("UPDATE np_numbers SET previous_operator_id = current_operator_id, "
-                            + "current_operator_id = ?, status = ?, " + timestampColumn + " = UTC_TIMESTAMP(6), "
-                            + "source_message_id = ?, updated_at = UTC_TIMESTAMP(6) WHERE id = ?")
-                        .execute(Tuple.of(newOperatorId, status, messageId, row.getLong("id")))
+                    // a confirmation of the current owner (e.g. its own Publish) keeps the real previous owner
+                    return tx.preparedQuery("UPDATE np_numbers SET previous_operator_id = IF(current_operator_id <=> ?, "
+                            + "previous_operator_id, current_operator_id), current_operator_id = ?, status = ?, "
+                            + timestampColumn + " = UTC_TIMESTAMP(6), source_message_id = ?, updated_at = UTC_TIMESTAMP(6) WHERE id = ?")
+                        .execute(Tuple.of(newOperatorId, newOperatorId, status, messageId, row.getLong("id")))
                         .mapEmpty();
                 }
                 previousOperatorId.set(originalIfUnknown);
