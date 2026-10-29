@@ -5,6 +5,7 @@ import { operatorApi, endpointApi } from '../api/client'
 import { Operator, OperatorEndpoint } from '../api/types'
 import PageHeader from '../components/PageHeader'
 import { useAuth } from '../auth/AuthContext'
+import ReasonDialog from '../components/ReasonDialog'
 import {
   Alert, Box, Button, Card, CardContent, Chip, Dialog, DialogActions, DialogContent,
   DialogTitle, Divider, FormControl, FormControlLabel, IconButton, InputLabel, MenuItem,
@@ -167,6 +168,7 @@ export default function OperatorList() {
   const { data, isLoading } = useQuery({ queryKey: ['operators'], queryFn: operatorApi.list })
   const [dialog, setDialog] = useState<{ mode: 'create' | 'edit'; form: FormState } | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [availability, setAvailability] = useState<{ operator: Operator; down: boolean } | null>(null)
 
   const save = useMutation({
     mutationFn: (d: { mode: 'create' | 'edit'; form: FormState }) => {
@@ -242,11 +244,19 @@ export default function OperatorList() {
     },
     ...(canManagePeers
       ? [{
-          field: 'actions', headerName: '', width: 70, sortable: false, filterable: false,
+          field: 'actions', headerName: '', width: 150, sortable: false, filterable: false,
           renderCell: (p: { row: Operator }) => (
-            <IconButton size="small" onClick={() => openEdit(p.row)} aria-label="edit">
-              <EditIcon fontSize="small" />
-            </IconButton>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, height: '100%' }}>
+              <IconButton size="small" onClick={() => openEdit(p.row)} aria-label="edit">
+                <EditIcon fontSize="small" />
+              </IconButton>
+              {!p.row.isLocal && (
+                <Button size="small" color={p.row.availabilityStatus === 'DOWN' ? 'success' : 'warning'}
+                  onClick={() => setAvailability({ operator: p.row, down: p.row.availabilityStatus !== 'DOWN' })}>
+                  {p.row.availabilityStatus === 'DOWN' ? 'Mark up' : 'Mark down'}
+                </Button>
+              )}
+            </Box>
           )
         } as GridColDef<Operator>]
       : [])
@@ -408,6 +418,18 @@ export default function OperatorList() {
           </Button>
         </DialogActions>
       </Dialog>
+      <ReasonDialog
+        open={!!availability}
+        title={availability?.down ? `Mark ${availability.operator.operatorCode} down` : `Mark ${availability?.operator.operatorCode} up`}
+        description={availability?.down
+          ? 'Outbound messages to this operator are held until it is marked up again.'
+          : 'Held outbound messages are released immediately.'}
+        onClose={() => setAvailability(null)}
+        onConfirm={reason => (availability!.down
+          ? operatorApi.markDown(availability!.operator.operatorCode, reason)
+          : operatorApi.markUp(availability!.operator.operatorCode, reason))
+          .then(() => queryClient.invalidateQueries({ queryKey: ['operators'] }))}
+      />
     </Box>
   )
 }

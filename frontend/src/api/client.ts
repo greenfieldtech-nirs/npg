@@ -1,5 +1,8 @@
 import axios from 'axios'
-import { DashboardSummary, Workflow, WorkflowEvent, Message, MessagePair, Operator, OperatorEndpoint, ManualTask, NumberRecord, OwnershipHistoryEntry, SystemUser } from './types'
+import {
+  DashboardSummary, Workflow, WorkflowEvent, Message, MessagePair, Operator, OperatorEndpoint, ManualTask, NumberRecord,
+  OwnershipHistoryEntry, SystemUser, OutboxItem, InboxItem, TimerItem, WorkflowMessage, PublicationRecipient, NumberRange
+} from './types'
 
 const api = axios.create({
   baseURL: '/api',
@@ -42,13 +45,68 @@ export const dashboardApi = {
   getSummary: () => api.get<DashboardSummary>('/dashboard').then(r => r.data)
 }
 
+/** Human-readable message from an API error ({"error": "..."} bodies), for alerts. */
+export function apiErrorMessage(err: unknown, fallback = 'Request failed'): string {
+  if (axios.isAxiosError(err)) return err.response?.data?.error ?? err.message
+  return err instanceof Error ? err.message : fallback
+}
+
 export const workflowApi = {
-  search: (params?: { phoneNumber?: string; state?: string; page?: number; size?: number }) =>
+  search: (params?: {
+    phoneNumber?: string; state?: string; requestId?: string; workflowType?: string; localRole?: string
+    operatorCode?: string; page?: number; size?: number
+  }) =>
     api.get<Workflow[]>('/workflows', { params }).then(r => r.data),
   get: (uuid: string) => api.get<Workflow>(`/workflows/${uuid}`).then(r => r.data),
   getEvents: (uuid: string) => api.get<WorkflowEvent[]>(`/workflows/${uuid}/events`).then(r => r.data),
   manualTransition: (uuid: string, toState: string, reason: string) =>
-    api.post(`/workflows/${uuid}/manual-transition`, { toState, reason })
+    api.post(`/workflows/${uuid}/manual-transition`, { toState, reason }),
+  timers: (uuid: string) => api.get<TimerItem[]>(`/workflows/${uuid}/timers`).then(r => r.data),
+  messages: (uuid: string) => api.get<WorkflowMessage[]>(`/workflows/${uuid}/messages`).then(r => r.data),
+  publication: (uuid: string) => api.get<PublicationRecipient[]>(`/workflows/${uuid}/publication`).then(r => r.data),
+  updatePortTime: (uuid: string, portTime: string) => api.post(`/workflows/${uuid}/port-time`, { portTime }),
+  cancel: (uuid: string, reason: string) => api.post(`/workflows/${uuid}/cancel`, { reason }),
+  cancelPublication: (uuid: string, reason: string) => api.post(`/workflows/${uuid}/cancel-publication`, { reason }),
+  decide: (uuid: string, approve: boolean, reasonCode?: string, reasonText?: string) =>
+    api.post(`/workflows/${uuid}/decision`, { approve, reasonCode, reasonText })
+}
+
+export interface PortInRequest {
+  phoneNumber?: string; phoneNumbers?: string[]; numberType: string; donorOperatorCode: string
+  identificationValue?: string; requestedPortTime?: string
+}
+
+export const portingApi = {
+  start: (request: PortInRequest) => api.post<Record<string, unknown>>('/porting', request).then(r => r.data)
+}
+
+export const processApi = {
+  startReturn: (phoneNumber: string) => api.post<{ workflowUuid: string }>(`/numbers/${phoneNumber}/return`).then(r => r.data),
+  inquire: (phoneNumber: string, operatorCode: string) =>
+    api.post<{ workflowUuid: string }>('/inquiries', { phoneNumber, operatorCode }).then(r => r.data),
+  announce: (down: boolean, reason: string, expectedDuration?: string) =>
+    api.post<{ workflowUuid: string }>(`/maintenance/${down ? 'down' : 'up'}`, { reason, expectedDuration }).then(r => r.data),
+  requestSync: (operatorCode: string, syncType = 'FULL') =>
+    api.post<{ workflowUuid: string }>('/sync', { operatorCode, syncType }).then(r => r.data)
+}
+
+export const queueApi = {
+  outbox: (status?: string) => api.get<OutboxItem[]>('/outbox', { params: { status, size: 200 } }).then(r => r.data),
+  inbox: (status?: string) => api.get<InboxItem[]>('/inbox', { params: { status, size: 200 } }).then(r => r.data),
+  timers: (status?: string) => api.get<TimerItem[]>('/timers', { params: { status, size: 200 } }).then(r => r.data),
+  retryOutbox: (uuid: string, reason: string) => api.post(`/outbox/${uuid}/retry`, { reason }),
+  markDelivered: (uuid: string, reason: string) => api.post(`/outbox/${uuid}/mark-delivered`, { reason }),
+  cancelOutbox: (uuid: string, reason: string) => api.post(`/outbox/${uuid}/cancel`, { reason }),
+  retryInbox: (uuid: string, reason: string) => api.post(`/inbox/${uuid}/retry`, { reason }),
+  cancelTimer: (uuid: string, reason: string) => api.post(`/timers/${uuid}/cancel`, { reason }),
+  fireTimer: (uuid: string, reason: string) => api.post(`/timers/${uuid}/fire-now`, { reason })
+}
+
+export const numberRangeApi = {
+  list: () => api.get<NumberRange[]>('/number-ranges').then(r => r.data),
+  create: (operatorCode: string, prefix: string, description?: string) =>
+    api.post('/number-ranges', { operatorCode, prefix, description }),
+  remove: (id: number) => api.delete(`/number-ranges/${id}`)
 }
 
 export const messageApi = {
@@ -72,6 +130,8 @@ export const operatorApi = {
   get: (code: string) => api.get<Operator>(`/operators/${code}`).then(r => r.data),
   markDown: (code: string, reason: string) =>
     api.post(`/operators/${code}/mark-down`, { reason }),
+  markUp: (code: string, reason: string) =>
+    api.post(`/operators/${code}/mark-up`, { reason }),
   create: (data: { operatorCode: string; operatorName: string; licenseType?: string; isLocal?: boolean; reason: string }) =>
     api.post<Operator>('/operators', data).then(r => r.data),
   update: (code: string, data: { operatorName?: string; licenseType?: string; contactName?: string; contactPhone?: string; contactEmail?: string; isActive?: boolean; isLocal?: boolean; reason: string }) =>
@@ -88,6 +148,9 @@ export const endpointApi = {
 
 export const manualTaskApi = {
   list: (status?: string) => api.get<ManualTask[]>('/manual-tasks', { params: { status } }).then(r => r.data),
+  get: (uuid: string) => api.get<ManualTask>(`/manual-tasks/${uuid}`).then(r => r.data),
+  assign: (uuid: string, assignee?: string) => api.post(`/manual-tasks/${uuid}/assign`, { assignee }),
+  addNote: (uuid: string, note: string) => api.post(`/manual-tasks/${uuid}/notes`, { note }),
   resolve: (uuid: string, resolution: string) =>
     api.post(`/manual-tasks/${uuid}/resolve`, { resolution })
 }

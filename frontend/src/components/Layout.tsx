@@ -16,18 +16,26 @@ import TaskAltIcon from '@mui/icons-material/TaskAlt'
 import PinIcon from '@mui/icons-material/Pin'
 import ManageAccountsIcon from '@mui/icons-material/ManageAccounts'
 import HomeWorkIcon from '@mui/icons-material/HomeWork'
+import SwapHorizIcon from '@mui/icons-material/SwapHoriz'
+import HubIcon from '@mui/icons-material/Hub'
+import QueueIcon from '@mui/icons-material/Queue'
+import ViewListIcon from '@mui/icons-material/ViewList'
 
 const DRAWER_WIDTH = 240
 
-const navItems = [
+const navItems: { label: string; path: string; icon: JSX.Element; adminOnly?: boolean; operatorOnly?: boolean }[] = [
   { label: 'Dashboard', path: '/', icon: <DashboardIcon fontSize="small" /> },
   { label: 'Workflows', path: '/workflows', icon: <AccountTreeIcon fontSize="small" /> },
+  { label: 'Start Port-In', path: '/porting/new', icon: <SwapHorizIcon fontSize="small" />, operatorOnly: true },
+  { label: 'Processes', path: '/processes', icon: <HubIcon fontSize="small" />, operatorOnly: true },
+  { label: 'Queues & Timers', path: '/queues', icon: <QueueIcon fontSize="small" /> },
   { label: 'Log Viewer', path: '/messages', icon: <MailOutlineIcon fontSize="small" /> },
   { label: 'Operators', path: '/operators', icon: <CellTowerIcon fontSize="small" /> },
   { label: 'Users', path: '/users', icon: <ManageAccountsIcon fontSize="small" />, adminOnly: true },
   { label: 'Local Setup', path: '/settings/local', icon: <HomeWorkIcon fontSize="small" />, adminOnly: true },
   { label: 'Manual Tasks', path: '/manual-tasks', icon: <TaskAltIcon fontSize="small" /> },
-  { label: 'Numbers', path: '/numbers', icon: <PinIcon fontSize="small" /> }
+  { label: 'Numbers', path: '/numbers', icon: <PinIcon fontSize="small" /> },
+  { label: 'Number Ranges', path: '/number-ranges', icon: <ViewListIcon fontSize="small" />, adminOnly: true }
 ]
 
 function pageTitle(pathname: string): string {
@@ -43,6 +51,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   const busy = useIsFetching() + useIsMutating() > 0
   const { user, logout, hasRole } = useAuth()
   const isAdmin = hasRole('ADMIN')
+  const isOperator = hasRole('ADMIN', 'MANAGER')
 
   const onLogout = () => {
     logout()
@@ -106,7 +115,7 @@ export default function Layout({ children }: { children: ReactNode }) {
           </Typography>
         </Box>
         <List sx={{ px: 1.5 }}>
-          {navItems.filter(item => !item.adminOnly || isAdmin).map(item => {
+          {navItems.filter(item => (!item.adminOnly || isAdmin) && (!item.operatorOnly || isOperator)).map(item => {
             const selected = location.pathname === item.path
             return (
               <ListItemButton

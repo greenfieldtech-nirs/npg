@@ -2,6 +2,11 @@ export interface Workflow {
   id: number;
   workflowUuid: string;
   workflowType: string;
+  localRole: string;
+  counterpartyCode?: string | null;
+  contextJson?: string | Record<string, unknown> | null;
+  machineStates?: string[];
+  finished?: boolean;
   requestId: string;
   phoneNumber: string;
   customerBatchId: string | null;
@@ -111,6 +116,12 @@ export interface ManualTask {
   severity: string;
   status: string;
   description: string;
+  assignedTo?: string | null;
+  resolution?: string | null;
+  workflowUuid?: string | null;
+  requestId?: string | null;
+  phoneNumber?: string | null;
+  notes?: { note: string; createdBy: string | null; createdAt: string }[];
   createdAt: string;
 }
 
@@ -133,4 +144,43 @@ export interface DashboardSummary {
   failedWorkflows: number;
   operatorsDown: number;
   timersDue: number;
+  timersDueSoon: number;
+  workflowsInManualReview: number;
+  outboxNeedsAttention: number;
+  inboxFailed: number;
+  publicationBacklog: number;
+  operatorsNeedingConfiguration: number;
+}
+
+export interface OutboxItem {
+  outboxUuid: string; status: string; itemType: string; attempts: number; maxAttempts: number; dueAt: string;
+  lastErrorCode: string | null; lastErrorMessage: string | null; updatedAt: string; messageUuid: string;
+  requestId: string | null; transactionId: string | null; destination: string | null; workflowUuid: string | null;
+}
+
+export interface InboxItem {
+  inboxUuid: string; status: string; itemType: string; attempts: number; maxAttempts: number; dueAt: string;
+  lastErrorCode: string | null; lastErrorMessage: string | null; updatedAt: string; messageUuid: string;
+  requestId: string | null; transactionId: string | null; sender: string | null;
+}
+
+export interface TimerItem {
+  timerUuid: string; timerName: string; timerType: string; status: string; dueAt: string; firedAt: string | null;
+  cancelledAt: string | null; attempts: number; workflowUuid?: string | null; requestId?: string | null;
+  phoneNumber?: string | null; currentState?: string | null;
+}
+
+export interface WorkflowMessage {
+  messageUuid: string; messageType: string; direction: string; requestId: string | null; transactionId: string | null;
+  correlationId: string | null; technicalStatus: string; ackStatus: string | null; nackCode: string | null;
+  createdAt: string; sender: string | null; receiver: string | null; outboxStatus: string | null; outboxUuid: string | null;
+}
+
+export interface PublicationRecipient {
+  purpose: string; status: string; responseStatus: string | null; sentAt: string | null; responseAt: string | null;
+  attempts: number; operatorCode: string;
+}
+
+export interface NumberRange {
+  id: number; prefix: string; description: string | null; operatorCode: string; createdAt: string;
 }

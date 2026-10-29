@@ -11,6 +11,16 @@ export default defineConfig({
     }
   },
   build: {
-    outDir: 'dist'
+    outDir: 'dist',
+    rollupOptions: {
+      output: {
+        // vendor code changes rarely: separate chunks stay cached across console releases
+        manualChunks: {
+          react: ['react', 'react-dom', 'react-router-dom', '@tanstack/react-query', 'axios'],
+          mui: ['@mui/material', '@emotion/react', '@emotion/styled'],
+          grid: ['@mui/x-data-grid']
+        }
+      }
+    }
   }
 })

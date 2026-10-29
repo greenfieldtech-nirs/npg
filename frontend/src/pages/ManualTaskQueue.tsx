@@ -1,31 +1,82 @@
-import { useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { Link } from 'react-router-dom'
+import { Box, Button, Card, Chip, FormControl, InputLabel, MenuItem, Select, Stack, Typography } from '@mui/material'
 import { DataGrid, GridColDef } from '@mui/x-data-grid'
 import { manualTaskApi } from '../api/client'
 import { ManualTask } from '../api/types'
 import PageHeader from '../components/PageHeader'
-import { Box } from '@mui/material'
+import ReasonDialog from '../components/ReasonDialog'
+import { useAuth } from '../auth/AuthContext'
 
-const columns: GridColDef<ManualTask>[] = [
-  { field: 'taskUuid', headerName: 'UUID', width: 280 },
-  { field: 'taskType', headerName: 'Type', width: 150 },
-  { field: 'severity', headerName: 'Severity', width: 100 },
-  { field: 'status', headerName: 'Status', width: 100 },
-  { field: 'description', headerName: 'Description', width: 300 }
-]
+const SEVERITY_COLOR: Record<string, 'error' | 'warning' | 'default'> = { HIGH: 'error', MEDIUM: 'warning', LOW: 'default' }
 
+type Pending = { task: ManualTask; kind: 'note' | 'resolve' } | null
+
+/** The NOC's work queue: everything automation handed over (timeouts, rejections, unknown deliveries...). */
 export default function ManualTaskQueue() {
-  const { data, isLoading } = useQuery({ queryKey: ['manualTasks'], queryFn: () => manualTaskApi.list('OPEN') })
+  const { hasRole, user } = useAuth()
+  const canOperate = hasRole('ADMIN', 'MANAGER')
+  const queryClient = useQueryClient()
+  const [status, setStatus] = useState('OPEN')
+  const [pending, setPending] = useState<Pending>(null)
+  const { data, isLoading } = useQuery({ queryKey: ['manualTasks', status], queryFn: () => manualTaskApi.list(status) })
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ['manualTasks'] })
+
+  const columns: GridColDef<ManualTask>[] = [
+    { field: 'createdAt', headerName: 'Opened', width: 160, valueFormatter: (v: string) => v?.replace('T', ' ').slice(0, 19) },
+    {
+      field: 'severity', headerName: 'Severity', width: 100,
+      renderCell: p => <Chip size="small" label={p.row.severity} color={SEVERITY_COLOR[p.row.severity] ?? 'default'} />
+    },
+    { field: 'taskType', headerName: 'Type', width: 200 },
+    {
+      field: 'description', headerName: 'What happened', flex: 1, minWidth: 320,
+      renderCell: p => <Typography variant="body2" sx={{ whiteSpace: 'normal', lineHeight: 1.4, py: 1 }}>{p.row.description}</Typography>
+    },
+    {
+      field: 'workflowUuid', headerName: 'Workflow', width: 120,
+      renderCell: p => p.row.workflowUuid ? <Link to={`/workflows/${p.row.workflowUuid}`}>{p.row.phoneNumber ?? 'open'}</Link> : '—'
+    },
+    { field: 'assignedTo', headerName: 'Assignee', width: 110 },
+    {
+      field: 'actions', headerName: '', width: 250, sortable: false,
+      renderCell: p => canOperate && p.row.status !== 'CLOSED' && (
+        <Stack direction="row" spacing={1} sx={{ alignItems: 'center', height: '100%' }}>
+          {p.row.assignedTo !== user?.username &&
+            <Button size="small" onClick={() => manualTaskApi.assign(p.row.taskUuid).then(refresh)}>Take</Button>}
+          <Button size="small" onClick={() => setPending({ task: p.row, kind: 'note' })}>Note</Button>
+          <Button size="small" variant="contained" onClick={() => setPending({ task: p.row, kind: 'resolve' })}>Resolve</Button>
+        </Stack>
+      )
+    }
+  ]
 
   return (
     <Box>
-      <PageHeader title="Manual Tasks" subtitle="Open items awaiting operator action" />
-      <DataGrid
-        rows={data || []}
-        columns={columns}
-        getRowId={row => row.taskUuid}
-        loading={isLoading}
-        pageSizeOptions={[10, 25, 50]}
-        initialState={{ pagination: { paginationModel: { pageSize: 10 } } }}
+      <PageHeader title="Manual Tasks" subtitle="Situations the gateway handed to the NOC" />
+      <Card sx={{ p: 2 }}>
+        <FormControl size="small" sx={{ minWidth: 180, mb: 2 }}>
+          <InputLabel>Status</InputLabel>
+          <Select label="Status" value={status} onChange={e => setStatus(e.target.value)}>
+            {['OPEN', 'IN_PROGRESS', 'CLOSED'].map(s => <MenuItem key={s} value={s}>{s}</MenuItem>)}
+          </Select>
+        </FormControl>
+        <Box sx={{ height: 600 }}>
+          <DataGrid rows={data ?? []} columns={columns} getRowId={row => row.taskUuid} loading={isLoading}
+            getRowHeight={() => 'auto'} pageSizeOptions={[25, 50, 100]}
+            initialState={{ pagination: { paginationModel: { pageSize: 25 } } }} />
+        </Box>
+      </Card>
+      <ReasonDialog
+        open={pending?.kind === 'note'} title="Add note" reasonLabel="Note" confirmLabel="Add note"
+        description={pending?.task.description}
+        onClose={() => setPending(null)} onConfirm={note => manualTaskApi.addNote(pending!.task.taskUuid, note).then(refresh)}
+      />
+      <ReasonDialog
+        open={pending?.kind === 'resolve'} title="Resolve task" reasonLabel="Resolution (audited)" confirmLabel="Resolve"
+        description={pending?.task.description}
+        onClose={() => setPending(null)} onConfirm={resolution => manualTaskApi.resolve(pending!.task.taskUuid, resolution).then(refresh)}
       />
     </Box>
   )

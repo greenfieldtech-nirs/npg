@@ -1,6 +1,7 @@
 // Design language adapted from SaaSable UI (https://github.com/phoenixcoded/saasable-ui), MIT License © Phoenixcoded
 import Loader from '../components/Loader'
 import { useQuery } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 import { Grid, Card, Box, Typography, keyframes, useTheme } from '@mui/material'
 import AccountTreeIcon from '@mui/icons-material/AccountTree'
 import MoveToInboxIcon from '@mui/icons-material/MoveToInbox'
@@ -21,18 +22,25 @@ type Tint = 'primary' | 'info' | 'warning' | 'error' | 'success'
 
 export default function Dashboard() {
   const theme = useTheme()
-  const { data, isLoading } = useQuery({ queryKey: ['dashboard'], queryFn: dashboardApi.getSummary })
+  const navigate = useNavigate()
+  const { data, isLoading } = useQuery({ queryKey: ['dashboard'], queryFn: dashboardApi.getSummary, refetchInterval: 15000 })
 
   if (isLoading) return <Loader />
 
-  const cards = data ? [
+  const cards: { label: string; value: number; icon: JSX.Element; tint: Tint; to?: string }[] = data ? [
     { label: 'Active Workflows', value: data.activeWorkflows, icon: <AccountTreeIcon />, tint: 'primary' as Tint },
     { label: 'Inbox Pending', value: data.inboxPending, icon: <MoveToInboxIcon />, tint: 'info' as Tint },
     { label: 'Outbox Pending', value: data.outboxPending, icon: <OutboxIcon />, tint: 'info' as Tint },
-    { label: 'Open Manual Tasks', value: data.openManualTasks, icon: <TaskAltIcon />, tint: 'warning' as Tint },
+    { label: 'Open Manual Tasks', value: data.openManualTasks, icon: <TaskAltIcon />, tint: 'warning' as Tint, to: '/manual-tasks' },
     { label: 'Failed Workflows', value: data.failedWorkflows, icon: <ErrorOutlineIcon />, tint: 'error' as Tint },
-    { label: 'Operators Down', value: data.operatorsDown, icon: <CellTowerIcon />, tint: 'error' as Tint },
-    { label: 'Timers Due', value: data.timersDue, icon: <ScheduleIcon />, tint: 'info' as Tint }
+    { label: 'Operators Down', value: data.operatorsDown, icon: <CellTowerIcon />, tint: 'error' as Tint, to: '/operators' },
+    { label: 'Timers Due', value: data.timersDue, icon: <ScheduleIcon />, tint: 'info' as Tint, to: '/queues' },
+    { label: 'Timers Due Within 1h', value: data.timersDueSoon, icon: <ScheduleIcon />, tint: 'info' as Tint, to: '/queues' },
+    { label: 'Workflows In Manual Review', value: data.workflowsInManualReview, icon: <AccountTreeIcon />, tint: 'warning' as Tint, to: '/workflows?state=MANUAL_REVIEW' },
+    { label: 'Outbox Needing Attention', value: data.outboxNeedsAttention, icon: <OutboxIcon />, tint: 'error' as Tint, to: '/queues' },
+    { label: 'Failed Inbound Messages', value: data.inboxFailed, icon: <MoveToInboxIcon />, tint: 'error' as Tint, to: '/queues' },
+    { label: 'Publication Responses Pending', value: data.publicationBacklog, icon: <OutboxIcon />, tint: 'info' as Tint },
+    { label: 'Operators To Configure', value: data.operatorsNeedingConfiguration, icon: <CellTowerIcon />, tint: 'warning' as Tint, to: '/operators' }
   ] : []
 
   return (
@@ -43,7 +51,10 @@ export default function Dashboard() {
           const tint = theme.palette[card.tint]
           return (
             <Grid item xs={12} sm={6} md={3} key={card.label}>
-              <Card sx={{ p: 2.5, animation: `${rise} 400ms ease both`, animationDelay: `${i * 60}ms` }}>
+              <Card
+                onClick={() => card.to && navigate(card.to)}
+                sx={{ p: 2.5, animation: `${rise} 400ms ease both`, animationDelay: `${i * 60}ms`, cursor: card.to ? 'pointer' : 'default' }}
+              >
                 <Box
                   sx={{
                     width: 44, height: 44, borderRadius: 2.5, mb: 2,

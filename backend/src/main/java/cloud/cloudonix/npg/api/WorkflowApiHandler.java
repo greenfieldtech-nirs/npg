@@ -51,10 +51,23 @@ public class WorkflowApiHandler {
         }
     }
 
+    /** The workflow plus the states of its own state machine (targets for manual transitions). */
     public Future<JsonObject> getWorkflow(String workflowUuid) {
-        return pool.preparedQuery("SELECT * FROM np_workflows WHERE workflow_uuid = ?")
+        return pool.preparedQuery("""
+                SELECT w.*, c.operator_code AS counterparty_code FROM np_workflows w
+                LEFT JOIN np_operators c ON c.id = w.counterparty_operator_id WHERE w.workflow_uuid = ?
+                """)
             .execute(Tuple.of(workflowUuid))
-            .map(rows -> rows.iterator().hasNext() ? RowJson.rowToJson(rows.iterator().next()) : null);
+            .map(rows -> {
+                if (!rows.iterator().hasNext()) {
+                    return null;
+                }
+                JsonObject wf = RowJson.rowToJson(rows.iterator().next());
+                cloud.cloudonix.npg.workflow.StateMachines.find(wf.getString("workflowType"), wf.getString("localRole"))
+                    .ifPresent(m -> wf.put("machineStates", new JsonArray(java.util.List.copyOf(m.states())))
+                        .put("finished", m.isTerminal(wf.getString("currentState"))));
+                return wf;
+            });
     }
 
     public Future<JsonArray> getWorkflowEvents(String workflowUuid) {
