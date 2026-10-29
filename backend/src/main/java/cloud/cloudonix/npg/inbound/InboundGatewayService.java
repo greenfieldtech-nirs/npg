@@ -35,8 +35,16 @@ public class InboundGatewayService {
     private final ProtocolCatalogLoader catalogLoader;
     private final SecureXmlParser xmlParser;
 
+    private final PeerAuthenticator peerAuthenticator;
+
     public InboundGatewayService(Pool pool, XmlAuditService xmlAuditService,
                                  ProtocolCatalogLoader catalogLoader) {
+        this(pool, xmlAuditService, catalogLoader, PeerAuthenticator.fromEnvironment());
+    }
+
+    public InboundGatewayService(Pool pool, XmlAuditService xmlAuditService,
+                                 ProtocolCatalogLoader catalogLoader, PeerAuthenticator peerAuthenticator) {
+        this.peerAuthenticator = peerAuthenticator;
         this.pool = pool;
         this.messageRepository = new MessageRepository(pool);
         this.inboxRepository = new InboxRepository(pool);
@@ -78,12 +86,21 @@ public class InboundGatewayService {
 
         String idempotencyKey = header.buildIdempotencyKey();
 
-        return acceptDurably(header, rawXml, transport, idempotencyKey)
-            // two identical messages racing past the duplicate check: the unique key decides, and
-            // the loser gets the same duplicate NACK instead of an internal error
-            .recover(err -> isDuplicateKey(err)
-                ? Future.succeededFuture(duplicateNack(header))
-                : Future.failedFuture(err));
+        return peerAuthenticator.authorize(pool, header, transport).compose(decision -> {
+            if (!decision.allowed()) {
+                // unknown codes are still registered so the console can surface them for configuration
+                return pool.withTransaction(tx -> ensureOperatorsExist(tx, header))
+                    .<Void>mapEmpty()
+                    .recover(err -> Future.succeededFuture())
+                    .compose(v -> storeInvalidAndNack(header, rawXml, transport, decision.nackCode(), decision.reason()));
+            }
+            return acceptDurably(header, rawXml, transport, idempotencyKey)
+                // two identical messages racing past the duplicate check: the unique key decides, and
+                // the loser gets the same duplicate NACK instead of an internal error
+                .recover(err -> isDuplicateKey(err)
+                    ? Future.succeededFuture(duplicateNack(header))
+                    : Future.failedFuture(err));
+        });
     }
 
     private static TechnicalAck duplicateNack(ProtocolHeader header) {

@@ -62,6 +62,26 @@ public final class ClientAddress {
         return peer;
     }
 
+    /** True when the direct peer of this request is one of our trusted proxies. */
+    public boolean fromTrustedProxy(HttpServerRequest request) {
+        String peer = request.remoteAddress() != null ? request.remoteAddress().host() : null;
+        return peer != null && isTrusted(peer);
+    }
+
+    /** True when {@code address} falls in any of the given IP/CIDR entries (literals only, no DNS). */
+    public static boolean matchesAny(String address, List<String> cidrs) {
+        if (address == null) {
+            return false;
+        }
+        for (String entry : cidrs) {
+            String value = entry.trim();
+            if (!value.isEmpty() && Cidr.parse(value).contains(address)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     boolean isTrusted(String address) {
         for (Cidr cidr : trusted) {
             if (cidr.contains(address)) {
