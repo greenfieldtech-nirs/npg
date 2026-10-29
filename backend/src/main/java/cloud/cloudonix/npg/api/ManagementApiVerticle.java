@@ -52,6 +52,7 @@ public class ManagementApiVerticle extends AbstractVerticle {
     private NumberApiHandler numberApiHandler;
     private UserManagementApiHandler userManagementApiHandler;
     private PortingApiHandler portingApiHandler;
+    private ProcessApiHandler processApiHandler;
 
     @Override
     public void start(Promise<Void> startPromise) {
@@ -83,6 +84,7 @@ public class ManagementApiVerticle extends AbstractVerticle {
                 WorkflowServices services = WorkflowServices.create(vertx, pool, mongoFuture.result(),
                     Env.get("CATALOG_PATH", "docs/protocol"));
                 portingApiHandler = new PortingApiHandler(new PortingService(services, PortOutPolicy.fromEnvironment()));
+                processApiHandler = new ProcessApiHandler(services);
                 return xmlAuditService.ensureIndexes();
             })
             .compose(v -> {
@@ -177,6 +179,23 @@ public class ManagementApiVerticle extends AbstractVerticle {
             .handler(guard.requireAny("ADMIN", "MANAGER"))
             .handler(ctx -> handleEmpty(ctx, portingApiHandler.decide(ctx.pathParam("workflowUuid"), jsonBody(ctx),
                 ctx.get("actorId"), remoteIp(ctx))));
+
+        router.post("/api/numbers/:phoneNumber/return")
+            .handler(guard.requireAny("ADMIN", "MANAGER"))
+            .handler(ctx -> handleJson(ctx, processApiHandler.startReturn(ctx.pathParam("phoneNumber"), ctx.get("actorId"),
+                remoteIp(ctx))));
+        router.post("/api/inquiries")
+            .handler(guard.requireAny("ADMIN", "MANAGER"))
+            .handler(ctx -> handleJson(ctx, processApiHandler.inquire(jsonBody(ctx), ctx.get("actorId"), remoteIp(ctx))));
+        router.post("/api/maintenance/down")
+            .handler(guard.requireAny("ADMIN"))
+            .handler(ctx -> handleJson(ctx, processApiHandler.announce(true, jsonBody(ctx), ctx.get("actorId"), remoteIp(ctx))));
+        router.post("/api/maintenance/up")
+            .handler(guard.requireAny("ADMIN"))
+            .handler(ctx -> handleJson(ctx, processApiHandler.announce(false, jsonBody(ctx), ctx.get("actorId"), remoteIp(ctx))));
+        router.post("/api/sync")
+            .handler(guard.requireAny("ADMIN", "MANAGER"))
+            .handler(ctx -> handleJson(ctx, processApiHandler.requestSync(jsonBody(ctx), ctx.get("actorId"), remoteIp(ctx))));
 
         router.get("/api/messages")
             .handler(guard.authenticated())
