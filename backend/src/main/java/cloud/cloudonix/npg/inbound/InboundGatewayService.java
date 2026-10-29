@@ -70,6 +70,11 @@ public class InboundGatewayService {
             return storeInvalidAndNack(header, rawXml, transport, "NACK_MISSING_HEADER",
                 "Missing required header field");
         }
+        // responses must say which request they answer (requestTrxNo), or they cannot be correlated
+        if (catalogLoader.isResponse(header.messageType()) && (header.correlationId() == null || header.correlationId().isBlank())) {
+            return storeInvalidAndNack(header, rawXml, transport, "NACK_MISSING_HEADER",
+                header.messageType() + " must reference the request it answers (requestTrxNo)");
+        }
 
         String idempotencyKey = header.buildIdempotencyKey();
 
@@ -101,12 +106,13 @@ public class InboundGatewayService {
                     }
                     String messageUuid = UUID.randomUUID().toString();
                     return ensureOperatorsExist(tx, header)
-                        .compose(v -> xmlAuditService.storeInboundRawXml(messageUuid, null, header.messageType(),
+                        .compose(operatorIds -> xmlAuditService.storeInboundRawXml(messageUuid, null, header.messageType(),
                             header.senderOperator(), header.receiverOperator(), header.requestId(),
                             header.transactionId(), header.correlationId(), header.protocolVersion(),
                             rawXml, transport)
                         .compose(mongoDocId -> txMessageRepo.insertMessage(messageUuid, header.messageType(),
-                                "INBOUND", null, null, header.requestId(), header.transactionId(),
+                                "INBOUND", operatorIds.get(header.senderOperator()),
+                                operatorIds.get(header.receiverOperator()), header.requestId(), header.transactionId(),
                                 header.correlationId(), idempotencyKey, mongoDocId,
                                 XmlAuditService.sha256(rawXml), header.protocolVersion()))
                         .compose(messageId -> txInboxRepo.createInboxItem(messageId, null,
@@ -116,9 +122,11 @@ public class InboundGatewayService {
         });
     }
 
-    // ponytail: auto-register unknown operator codes as "requires configuration" entries;
-    // both directions are candidates since local identity isn't necessarily configured either
-    private Future<Void> ensureOperatorsExist(SqlClient tx, ProtocolHeader header) {
+    /**
+     * Resolves both operator codes to ids, auto-registering unknown codes as "requires configuration"
+     * entries (audited) so operators can review and configure them in the console.
+     */
+    private Future<java.util.Map<String, Long>> ensureOperatorsExist(SqlClient tx, ProtocolHeader header) {
         OperatorRepository operatorRepository = new OperatorRepository(tx);
         AuditEventRepository auditEvents = new AuditEventRepository(tx);
         java.util.Set<String> codes = new java.util.LinkedHashSet<>();
@@ -128,22 +136,27 @@ public class InboundGatewayService {
         if (header.receiverOperator() != null && !header.receiverOperator().isBlank()) {
             codes.add(header.receiverOperator());
         }
+        java.util.Map<String, Long> ids = new java.util.HashMap<>();
         Future<Void> chain = Future.succeededFuture();
         for (String code : codes) {
             chain = chain.compose(v -> operatorRepository.findByCode(code)
                 .compose(rows -> {
                     if (rows.size() > 0) {
+                        ids.put(code, rows.iterator().next().getLong("id"));
                         return Future.succeededFuture();
                     }
                     return operatorRepository.insertAutoDiscovered(code)
-                        .compose(id -> auditEvents.insertAuditEvent("SYSTEM", null,
-                            "OPERATOR_AUTO_DISCOVERED", "OPERATOR", code,
-                            new JsonObject().put("reason", "unknown operator code in inbound message")
-                                .put("messageType", header.messageType()).encode(), null))
+                        .compose(id -> {
+                            ids.put(code, id);
+                            return auditEvents.insertAuditEvent("SYSTEM", null,
+                                "OPERATOR_AUTO_DISCOVERED", "OPERATOR", code,
+                                new JsonObject().put("reason", "unknown operator code in inbound message")
+                                    .put("messageType", header.messageType()).encode(), null);
+                        })
                         .mapEmpty();
                 }));
         }
-        return chain;
+        return chain.map(ids);
     }
 
     private Future<TechnicalAck> storeInvalidAndNack(ProtocolHeader header, String rawXml,
@@ -156,7 +169,20 @@ public class InboundGatewayService {
                 "4.0", rawXml,
                 XmlValidationMetadata.invalid(new JsonArray().add(new JsonObject().put("error", message))),
                 transport)
-            .map(docId -> AckNackBuilder.nack(header, code, null, message,
+            // record the rejected message too (docs/04), so it is visible in the console log;
+            // it gets no inbox row, and a failure here must not turn the NACK into an error
+            .compose(docId -> pool.preparedQuery("""
+                    INSERT INTO np_messages (message_uuid, message_type, direction, request_id, transaction_id,
+                                             idempotency_key, mongo_document_id, xml_sha256, technical_status,
+                                             ack_status, nack_code, received_at)
+                    VALUES (?, ?, 'INBOUND', ?, ?, ?, ?, ?, 'REJECTED', 'NACK', ?, UTC_TIMESTAMP(6))
+                    """)
+                .execute(io.vertx.sqlclient.Tuple.from(new Object[]{messageUuid, messageType,
+                    header != null ? header.requestId() : null, header != null ? header.transactionId() : null,
+                    "REJECTED|" + messageUuid, docId, XmlAuditService.sha256(rawXml), code}))
+                .<Void>mapEmpty()
+                .recover(err -> Future.succeededFuture()))
+            .map(v -> AckNackBuilder.nack(header, code, null, message,
                 code.equals("NACK_DUPLICATE_MESSAGE") ? "IDEMPOTENCY" : "TRANSPORT",
                 code.equals("NACK_DUPLICATE_MESSAGE")));
     }

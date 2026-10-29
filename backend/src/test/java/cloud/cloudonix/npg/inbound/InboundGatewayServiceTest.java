@@ -174,4 +174,53 @@ class InboundGatewayServiceTest {
                 ctx.completeNow();
             })));
     }
+
+    @Test
+    void responseWithoutRequestTrxNoIsNackedAndLogged(VertxTestContext ctx) {
+        service = newService();
+        String xml = "<npMessageBody><Check_response><positiveApproval><approvalInd>Y</approvalInd>"
+            + "</positiveApproval></Check_response></npMessageBody>";
+        java.util.Map<String, String> headers = java.util.Map.of("x-np-from", "BZ", "x-np-to", "HL",
+            "x-np-request-id", "REQ-NOCORR", "x-np-trx-no", "BZ000000000001");
+        service.receive(xml, new XmlTransportMetadata("HTTPS", "1.2.3.4", null, new JsonObject()), headers)
+            .compose(ack -> {
+                ctx.verify(() -> {
+                    assertEquals(TechnicalAckStatus.NACK, ack.status());
+                    assertEquals("NACK_MISSING_HEADER", ack.nackReason().code());
+                });
+                return pool.query("SELECT technical_status, nack_code FROM np_messages WHERE request_id = 'REQ-NOCORR'").execute();
+            })
+            .compose(rows -> {
+                ctx.verify(() -> {
+                    assertEquals(1, rows.size(), "rejected messages are recorded for the console");
+                    assertEquals("REJECTED", rows.iterator().next().getString("technical_status"));
+                });
+                return pool.query("SELECT COUNT(*) AS c FROM np_inbox i JOIN np_messages m ON m.id = i.message_id "
+                    + "WHERE m.request_id = 'REQ-NOCORR'").execute();
+            })
+            .onComplete(ctx.succeeding(rows -> ctx.verify(() -> {
+                assertEquals(0L, rows.iterator().next().getLong("c"), "no business processing for rejects");
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void acceptedMessageRecordsOperatorIds(VertxTestContext ctx) {
+        service = newService();
+        String xml = "<npMessageBody><Check><fixed><fixedNumberSingle><numberType>S</numberType>"
+            + "<number>0812345678</number></fixedNumberSingle></fixed></Check></npMessageBody>";
+        java.util.Map<String, String> headers = java.util.Map.of("x-np-from", "HL", "x-np-to", "BZ",
+            "x-np-request-id", "REQ-IDS", "x-np-trx-no", "HL000000000042");
+        service.receive(xml, new XmlTransportMetadata("HTTPS", "1.2.3.4", null, new JsonObject()), headers)
+            .compose(ack -> pool.query("""
+                    SELECT so.operator_code AS sender, ro.operator_code AS receiver FROM np_messages m
+                    JOIN np_operators so ON so.id = m.sender_operator_id
+                    JOIN np_operators ro ON ro.id = m.receiver_operator_id
+                    WHERE m.request_id = 'REQ-IDS'""").execute())
+            .onComplete(ctx.succeeding(rows -> ctx.verify(() -> {
+                assertEquals("HL", rows.iterator().next().getString("sender"));
+                assertEquals("BZ", rows.iterator().next().getString("receiver"));
+                ctx.completeNow();
+            })));
+    }
 }

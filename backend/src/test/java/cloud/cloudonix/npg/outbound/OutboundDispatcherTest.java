@@ -29,7 +29,7 @@ class OutboundDispatcherTest {
     private static SqlClient sqlClient;
     private static MongoClient mongoClient;
     private static XmlAuditService xmlAuditService;
-    private static OutboxWriter outboxWriter;
+    private static OutboundMessageService outbound;
 
     @BeforeAll
     static void setUpClass(Vertx vertx, VertxTestContext ctx) {
@@ -57,7 +57,7 @@ class OutboundDispatcherTest {
                 xmlAuditService = new XmlAuditService(mongoClient);
                 xmlAuditService.ensureIndexes()
                     .onComplete(ctx.succeeding(v -> {
-                        outboxWriter = new OutboxWriter(pool, xmlAuditService);
+                        outbound = new OutboundMessageService(xmlAuditService);
                         ctx.completeNow();
                     }));
             }));
@@ -124,10 +124,13 @@ class OutboundDispatcherTest {
     }
 
     @Test
-    void outboxWriterCreatesMessageAndOutboxRows(VertxTestContext ctx) {
+    void outboundMessageCreatesMessageAndOutboxRows(VertxTestContext ctx) {
         JsonObject body = new JsonObject().put("PhoneNumber", "972501234567");
 
-        outboxWriter.writeOutbound(1L, 2L, "Check", "OP01", "OP02", "REQ-1", "TX-1", null, "4.0", body)
+        outbound.send(pool, null, "Check", "PORT",
+                new cloud.cloudonix.npg.domain.Operator(1L, "OP01", "One", null, true, "UP"),
+                new cloud.cloudonix.npg.domain.Operator(2L, "OP02", "Two", null, true, "UP"),
+                "REQ-1", null, body)
             .onComplete(ctx.succeeding(outboxId -> ctx.verify(() -> {
                 assertNotNull(outboxId);
 
