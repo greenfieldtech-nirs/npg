@@ -42,3 +42,44 @@
 ## Wire envelope format (observed 2026-10-27)
 
 Real operator trace shows header fields (MSG_TYPE, FROM, TO, REQUEST_ID, TRX_NO, PROCESS_TYPE, VERSION_NO, RETRY_NO, RETRY_DATE) delivered separately from the `<npMessageBody>` XML body. Exact wire packaging is unconfirmed — the gateway currently accepts both an XML envelope (`<npMessage>` with a header child) and bare `<npMessageBody>` with `X-NP-*` HTTP headers. **Open:** confirm the official envelope/header transport with the MoC specification or a peer operator before production. ACK response body shape (`NP_ACK` with `ACK_CODE=Ack00`, `ACK_DATE`) is observed in traces but its XML serialization is unconfirmed — our AckNack XML is a placeholder.
+
+## Implementation assumptions added 2026-10-30 (confirm before production)
+
+Each assumption below is implemented as a configurable placeholder or an isolated rule.
+
+14. **Execute direction.** Corrected from the trace: the recipient sends `Execute` (empty body) and the
+    donor answers `Execute_response` with `positiveApproval/disconnectDateTime`. The original
+    catalog had it reversed.
+15. **Negative business responses.** The trace only shows `positiveApproval/approvalInd=Y`. Rejections
+    are sent as `negativeApproval/approvalInd=N` with `rejectReasonCode` (from
+    `rejection-codes.yml`) and optional `rejectReasonText`. Confirm the element names.
+16. **Mobile numbers.** The trace only shows `fixed/fixedNumberSingle`. Mobile numbers use
+    `mobile/mobileNumberSingle` with `networkType=M`, by analogy.
+17. **REQUEST_ID / TRX_NO formats.** Generated in the trace's shape: `NP` + recipient + donor +
+    yyMMdd + 9 digits, and sender code + 12 digits.
+18. **Field names for messages missing from the trace** (Update, Cancel, KD_update, Return,
+    Inquire_number, Down_system/Up_system, DB_synch_*):
+    - `portingDateTime` for port times;
+    - `reason`, `expectedDuration`, `syncType`;
+    - `currentOperator` (inquiry answer);
+    - `fileReference` / `recordCount` (sync answer);
+    - `originalOperator` (return publication).
+19. **PROCESS_TYPE values.** `PORT` comes from the trace. `RETURN`, `INQUIRY`, `MAINTENANCE` and
+    `SYNC` are placeholders.
+20. **Timer durations and working calendar.** Placeholders, seeded in `np_system_parameters`
+    (`timer.<NAME>.seconds`, `calendar.*`). Holidays go in `np_working_calendar`.
+21. **Messages safe to re-send after an unknown delivery** (`OUTBOUND_SAFE_RESEND_TYPES`). The
+    specification does not say which messages tolerate duplicates. A peer's duplicate NACK (or 409)
+    is treated as delivered.
+22. **Number return cooling period** (`RETURN_COOLING_PERIOD`, placeholder 30 days).
+23. **DB synchronization transfer channel.** Still open (FTP/SFTP?). We answer with a reference to a
+    snapshot stored in MongoDB (`npg-sync:<id>`); nothing fetches peer files yet.
+24. **Publications for numbers we never recorded.** A third party cannot verify the first-ever
+    publication of another operator's native number unless that operator's number ranges are
+    configured (`np_number_ranges`). Without ranges, such a Publish is accepted from the
+    authenticated publisher when it names a donor. Configure every operator's ranges to close this
+    gap.
+25. **Port-out decisions.** The specification leaves the donor's eligibility rules to the
+    operator's business (customer identity, contract, debt), and BSS integration is out of scope.
+    `PORT_OUT_DECISION_MODE=MANUAL` (production default) hands each decision to the NOC;
+    `AUTO_APPROVE` approves whatever passes the hard rules.

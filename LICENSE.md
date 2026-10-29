@@ -49,7 +49,7 @@ additional terms as agreed.
 To obtain a commercial license, contact the maintainers via the project
 repository:
 
-- https://github.com/cloudonix/npg.cloudonix.cloud
+- https://github.com/greenfieldtech-nirs/npg
 
 ---
 

@@ -1,229 +1,220 @@
-openapi: 3.0.0
+openapi: 3.0.3
 info:
   title: NPG Management API
-  version: 0.1.0
+  version: 0.2.0
+  description: >
+    Management API of the Israeli Number Portability Gateway (JSON). Every route except
+    /api/auth/login and /health/* requires a Bearer token from /api/auth/login; the user's current
+    roles are re-read from the database on every request. Roles: USER (read), MANAGER (operate),
+    ADMIN (operate + configuration). Every mutation that changes protocol or queue state requires a
+    reason and is recorded in np_audit_events. Errors are {"error": "...", "errorId"?: "..."}.
+    Operator-to-operator traffic uses the inbound gateway (POST /np/inbound, XML), not this API.
+servers:
+  - url: /
+security:
+  - bearer: []
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer, bearerFormat: JWT }
+  parameters:
+    workflowUuid: { name: workflowUuid, in: path, required: true, schema: { type: string } }
+    status: { name: status, in: query, schema: { type: string } }
+    page: { name: page, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+    size: { name: size, in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
+  schemas:
+    Reason:
+      type: object
+      required: [reason]
+      properties: { reason: { type: string, description: Audited justification } }
+    Error:
+      type: object
+      properties: { error: { type: string }, errorId: { type: string } }
+    Started:
+      type: object
+      properties: { workflowUuid: { type: string }, requestId: { type: string } }
+  responses:
+    Ok: { description: Done }
+    BadRequest: { description: Invalid input, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    Forbidden: { description: Missing role }
+    NotFound: { description: Not found }
+    Conflict: { description: Not allowed in the current state, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 paths:
+  /health/live:
+    get: { security: [], summary: Liveness, responses: { '200': { $ref: '#/components/responses/Ok' } } }
+  /health/ready:
+    get: { security: [], summary: Readiness (MariaDB + MongoDB reachable), responses: { '200': { $ref: '#/components/responses/Ok' }, '503': { description: A store is down } } }
+  /api/auth/login:
+    post:
+      security: []
+      summary: Log in (throttled per client IP and per account; sets the HttpOnly device-trust cookie)
+      requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { username: { type: string }, password: { type: string } } } } } }
+      responses: { '200': { description: '{token, user}' }, '401': { description: Invalid credentials }, '429': { description: Too many attempts }, '503': { description: Busy } }
+  /api/auth/me:
+    get: { summary: Current user and roles, responses: { '200': { $ref: '#/components/responses/Ok' } } }
   /api/dashboard:
-    get:
-      summary: Dashboard summary
-      operationId: getDashboard
-      responses:
-        '200':
-          description: Dashboard counts
-          content:
-            application/json:
-              schema:
-                type: object
+    get: { summary: Operational counters (queues, timers, tasks, workflows, operators), responses: { '200': { $ref: '#/components/responses/Ok' } } }
+
   /api/workflows:
     get:
       summary: Search workflows
-      operationId: searchWorkflows
       parameters:
-        - name: phoneNumber
-          in: query
-          schema:
-            type: string
-        - name: state
-          in: query
-          schema:
-            type: string
-        - name: page
-          in: query
-          schema:
-            type: integer
-            default: 0
-        - name: size
-          in: query
-          schema:
-            type: integer
-            default: 20
-      responses:
-        '200':
-          description: Paginated workflows
+        - { name: phoneNumber, in: query, schema: { type: string } }
+        - { name: requestId, in: query, schema: { type: string } }
+        - { name: state, in: query, schema: { type: string } }
+        - { name: workflowType, in: query, schema: { type: string, enum: [PORTING, PUBLICATION, NUMBER_RETURN, NUMBER_INQUIRY, MAINTENANCE, DATA_SYNCHRONIZATION] } }
+        - { name: localRole, in: query, schema: { type: string } }
+        - { name: operatorCode, in: query, description: Counterparty, schema: { type: string } }
+        - { $ref: '#/components/parameters/page' }
+        - { $ref: '#/components/parameters/size' }
+      responses: { '200': { $ref: '#/components/responses/Ok' } }
   /api/workflows/{workflowUuid}:
-    get:
-      summary: Get workflow details
-      operationId: getWorkflow
-      parameters:
-        - name: workflowUuid
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Workflow details
-        '404':
-          description: Not found
+    get: { summary: Workflow with the states of its state machine (machineStates), parameters: [{ $ref: '#/components/parameters/workflowUuid' }], responses: { '200': { $ref: '#/components/responses/Ok' }, '404': { $ref: '#/components/responses/NotFound' } } }
   /api/workflows/{workflowUuid}/events:
-    get:
-      summary: Get workflow events
-      operationId: getWorkflowEvents
-      parameters:
-        - name: workflowUuid
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Workflow events
+    get: { summary: Event history, parameters: [{ $ref: '#/components/parameters/workflowUuid' }], responses: { '200': { $ref: '#/components/responses/Ok' } } }
+  /api/workflows/{workflowUuid}/messages:
+    get: { summary: Messages of the workflow with delivery and outbox status, parameters: [{ $ref: '#/components/parameters/workflowUuid' }], responses: { '200': { $ref: '#/components/responses/Ok' } } }
+  /api/workflows/{workflowUuid}/timers:
+    get: { summary: Timers of the workflow, parameters: [{ $ref: '#/components/parameters/workflowUuid' }], responses: { '200': { $ref: '#/components/responses/Ok' } } }
+  /api/workflows/{workflowUuid}/publication:
+    get: { summary: Per-recipient publication status, parameters: [{ $ref: '#/components/parameters/workflowUuid' }], responses: { '200': { $ref: '#/components/responses/Ok' } } }
   /api/workflows/{workflowUuid}/manual-transition:
     post:
-      summary: Manually transition a workflow
-      operationId: manualTransition
-      parameters:
-        - name: workflowUuid
-          in: path
-          required: true
-          schema:
-            type: string
+      summary: Override the state (MANAGER/ADMIN); toState must belong to the workflow's machine
+      parameters: [{ $ref: '#/components/parameters/workflowUuid' }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [toState, reason], properties: { toState: { type: string }, reason: { type: string } } } } } }
+      responses: { '200': { $ref: '#/components/responses/Ok' }, '400': { $ref: '#/components/responses/BadRequest' }, '403': { $ref: '#/components/responses/Forbidden' }, '404': { $ref: '#/components/responses/NotFound' } }
+
+  /api/porting:
+    post:
+      summary: Start port-ins (MANAGER/ADMIN); a batch is split into one workflow per number
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
+              required: [numberType, donorOperatorCode]
               properties:
-                toState:
-                  type: string
-                reason:
-                  type: string
-      responses:
-        '200':
-          description: Transition applied
+                phoneNumber: { type: string }
+                phoneNumbers: { type: array, items: { type: string }, maxItems: 500 }
+                numberType: { type: string, enum: [FIXED, MOBILE] }
+                donorOperatorCode: { type: string }
+                identificationValue: { type: string }
+                requestedPortTime: { type: string, format: date-time }
+                customerBatchId: { type: string }
+      responses: { '200': { description: 'Started (single) or {customerBatchId, results[]} (batch)' }, '400': { $ref: '#/components/responses/BadRequest' }, '409': { $ref: '#/components/responses/Conflict' } }
+  /api/workflows/{workflowUuid}/port-time:
+    post:
+      summary: Move a scheduled port (sends Update)
+      parameters: [{ $ref: '#/components/parameters/workflowUuid' }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [portTime], properties: { portTime: { type: string, format: date-time } } } } } }
+      responses: { '200': { $ref: '#/components/responses/Ok' }, '409': { $ref: '#/components/responses/Conflict' } }
+  /api/workflows/{workflowUuid}/cancel:
+    post: { summary: Cancel an approved port (sends Cancel), parameters: [{ $ref: '#/components/parameters/workflowUuid' }], requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Reason' } } } }, responses: { '200': { $ref: '#/components/responses/Ok' }, '409': { $ref: '#/components/responses/Conflict' } } }
+  /api/workflows/{workflowUuid}/cancel-publication:
+    post: { summary: Withdraw a completed port-in's publication (sends Cancel_Publish), parameters: [{ $ref: '#/components/parameters/workflowUuid' }], requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Reason' } } } }, responses: { '200': { $ref: '#/components/responses/Ok' }, '409': { $ref: '#/components/responses/Conflict' } } }
+  /api/workflows/{workflowUuid}/decision:
+    post:
+      summary: Approve or reject a port-out waiting for a NOC decision
+      parameters: [{ $ref: '#/components/parameters/workflowUuid' }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [approve], properties: { approve: { type: boolean }, reasonCode: { type: string, description: required when rejecting }, reasonText: { type: string } } } } } }
+      responses: { '200': { $ref: '#/components/responses/Ok' }, '409': { $ref: '#/components/responses/Conflict' } }
+
+  /api/numbers:
+    get: { summary: Numbers by prefix, parameters: [{ name: prefix, in: query, schema: { type: string } }, { $ref: '#/components/parameters/size' }], responses: { '200': { $ref: '#/components/responses/Ok' } } }
+  /api/numbers/{phoneNumber}:
+    get: { summary: Number routing record, parameters: [{ name: phoneNumber, in: path, required: true, schema: { type: string } }], responses: { '200': { $ref: '#/components/responses/Ok' }, '404': { $ref: '#/components/responses/NotFound' } } }
+  /api/numbers/{phoneNumber}/history:
+    get: { summary: Ownership history, parameters: [{ name: phoneNumber, in: path, required: true, schema: { type: string } }], responses: { '200': { $ref: '#/components/responses/Ok' } } }
+  /api/numbers/{phoneNumber}/return:
+    post: { summary: Start returning a ported-in, disconnected number, parameters: [{ name: phoneNumber, in: path, required: true, schema: { type: string } }], responses: { '200': { description: Started, content: { application/json: { schema: { $ref: '#/components/schemas/Started' } } } }, '400': { $ref: '#/components/responses/BadRequest' } } }
+  /api/inquiries:
+    post: { summary: Ask an operator who serves a number, requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { phoneNumber: { type: string }, operatorCode: { type: string } } } } } }, responses: { '200': { description: Started, content: { application/json: { schema: { $ref: '#/components/schemas/Started' } } } } } }
+  /api/sync:
+    post: { summary: Request a peer's synchronization snapshot, requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { operatorCode: { type: string }, syncType: { type: string, default: FULL } } } } } }, responses: { '200': { description: Started } } }
+  /api/maintenance/down:
+    post: { summary: Announce our downtime to every peer (ADMIN), requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { reason: { type: string }, expectedDuration: { type: string } } } } } }, responses: { '200': { description: Started } } }
+  /api/maintenance/up:
+    post: { summary: Announce our recovery to every peer (ADMIN), requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Reason' } } } }, responses: { '200': { $ref: '#/components/responses/Ok' }, '409': { $ref: '#/components/responses/Conflict' } } }
+
+  /api/manual-tasks:
+    get: { summary: Manual tasks, parameters: [{ name: status, in: query, schema: { type: string, enum: [OPEN, IN_PROGRESS, CLOSED] } }], responses: { '200': { $ref: '#/components/responses/Ok' } } }
+  /api/manual-tasks/{taskUuid}:
+    get: { summary: Task with notes, parameters: [{ name: taskUuid, in: path, required: true, schema: { type: string } }], responses: { '200': { $ref: '#/components/responses/Ok' }, '404': { $ref: '#/components/responses/NotFound' } } }
+  /api/manual-tasks/{taskUuid}/assign:
+    post: { summary: Assign (default to self), parameters: [{ name: taskUuid, in: path, required: true, schema: { type: string } }], requestBody: { content: { application/json: { schema: { type: object, properties: { assignee: { type: string } } } } } }, responses: { '200': { $ref: '#/components/responses/Ok' }, '409': { $ref: '#/components/responses/Conflict' } } }
+  /api/manual-tasks/{taskUuid}/notes:
+    post: { summary: Add a note, parameters: [{ name: taskUuid, in: path, required: true, schema: { type: string } }], requestBody: { required: true, content: { application/json: { schema: { type: object, required: [note], properties: { note: { type: string } } } } } }, responses: { '200': { $ref: '#/components/responses/Ok' } } }
+  /api/manual-tasks/{taskUuid}/resolve:
+    post: { summary: Resolve, parameters: [{ name: taskUuid, in: path, required: true, schema: { type: string } }], requestBody: { required: true, content: { application/json: { schema: { type: object, required: [resolution], properties: { resolution: { type: string } } } } } }, responses: { '200': { $ref: '#/components/responses/Ok' }, '409': { $ref: '#/components/responses/Conflict' } } }
+
+  /api/outbox:
+    get: { summary: Outbound queue, parameters: [{ $ref: '#/components/parameters/status' }, { $ref: '#/components/parameters/page' }, { $ref: '#/components/parameters/size' }], responses: { '200': { $ref: '#/components/responses/Ok' } } }
+  /api/outbox/{outboxUuid}/retry:
+    post: { summary: Re-queue with a fresh attempt budget (MANUAL_REVIEW, FAILED_FINAL, UNKNOWN_DELIVERY), parameters: [{ name: outboxUuid, in: path, required: true, schema: { type: string } }], requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Reason' } } } }, responses: { '200': { $ref: '#/components/responses/Ok' }, '409': { $ref: '#/components/responses/Conflict' } } }
+  /api/outbox/{outboxUuid}/mark-delivered:
+    post: { summary: Peer confirmed receipt (unknown-delivery runbook), parameters: [{ name: outboxUuid, in: path, required: true, schema: { type: string } }], requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Reason' } } } }, responses: { '200': { $ref: '#/components/responses/Ok' }, '409': { $ref: '#/components/responses/Conflict' } } }
+  /api/outbox/{outboxUuid}/cancel:
+    post: { summary: Never send, parameters: [{ name: outboxUuid, in: path, required: true, schema: { type: string } }], requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Reason' } } } }, responses: { '200': { $ref: '#/components/responses/Ok' }, '409': { $ref: '#/components/responses/Conflict' } } }
+  /api/inbox:
+    get: { summary: Inbound queue, parameters: [{ $ref: '#/components/parameters/status' }, { $ref: '#/components/parameters/page' }, { $ref: '#/components/parameters/size' }], responses: { '200': { $ref: '#/components/responses/Ok' } } }
+  /api/inbox/{inboxUuid}/retry:
+    post: { summary: Re-process a FAILED_FINAL message, parameters: [{ name: inboxUuid, in: path, required: true, schema: { type: string } }], requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Reason' } } } }, responses: { '200': { $ref: '#/components/responses/Ok' }, '409': { $ref: '#/components/responses/Conflict' } } }
+  /api/timers:
+    get: { summary: Timers, parameters: [{ $ref: '#/components/parameters/status' }, { $ref: '#/components/parameters/page' }, { $ref: '#/components/parameters/size' }], responses: { '200': { $ref: '#/components/responses/Ok' } } }
+  /api/timers/{timerUuid}/cancel:
+    post: { summary: Cancel a pending timer, parameters: [{ name: timerUuid, in: path, required: true, schema: { type: string } }], requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Reason' } } } }, responses: { '200': { $ref: '#/components/responses/Ok' }, '409': { $ref: '#/components/responses/Conflict' } } }
+  /api/timers/{timerUuid}/fire-now:
+    post: { summary: Make a pending timer due now, parameters: [{ name: timerUuid, in: path, required: true, schema: { type: string } }], requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Reason' } } } }, responses: { '200': { $ref: '#/components/responses/Ok' }, '409': { $ref: '#/components/responses/Conflict' } } }
+
   /api/messages:
     get:
-      summary: Search messages
-      operationId: searchMessages
+      summary: Message log
       parameters:
-        - name: requestId
-          in: query
-          schema:
-            type: string
-        - name: messageType
-          in: query
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Paginated messages
+        - { name: requestId, in: query, schema: { type: string } }
+        - { name: messageType, in: query, schema: { type: string } }
+        - { name: direction, in: query, schema: { type: string, enum: [INBOUND, OUTBOUND] } }
+        - { name: technicalStatus, in: query, schema: { type: string } }
+        - { name: dateFrom, in: query, schema: { type: string } }
+        - { name: dateTo, in: query, schema: { type: string } }
+        - { $ref: '#/components/parameters/page' }
+        - { $ref: '#/components/parameters/size' }
+      responses: { '200': { $ref: '#/components/responses/Ok' } }
   /api/messages/{messageUuid}:
-    get:
-      summary: Get message details
-      operationId: getMessage
-      parameters:
-        - name: messageUuid
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Message details
+    get: { summary: Message metadata, parameters: [{ name: messageUuid, in: path, required: true, schema: { type: string } }], responses: { '200': { $ref: '#/components/responses/Ok' } } }
+  /api/messages/{messageUuid}/pair:
+    get: { summary: Request/response pair, parameters: [{ name: messageUuid, in: path, required: true, schema: { type: string } }], responses: { '200': { $ref: '#/components/responses/Ok' } } }
   /api/messages/{messageUuid}/xml:
-    get:
-      summary: Get raw XML
-      operationId: getMessageXml
-      parameters:
-        - name: messageUuid
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Raw XML
+    get: { summary: Raw XML (every retrieval is audited), parameters: [{ name: messageUuid, in: path, required: true, schema: { type: string } }], responses: { '200': { description: XML, content: { application/xml: {} } } } }
+
   /api/operators:
-    get:
-      summary: List operators
-      operationId: listOperators
-      responses:
-        '200':
-          description: Operators
+    get: { summary: Operators, responses: { '200': { $ref: '#/components/responses/Ok' } } }
+    post: { summary: Create (MANAGER/ADMIN; isLocal requires ADMIN), responses: { '200': { $ref: '#/components/responses/Ok' }, '403': { $ref: '#/components/responses/Forbidden' }, '409': { $ref: '#/components/responses/Conflict' } } }
   /api/operators/{operatorCode}:
-    get:
-      summary: Get operator
-      operationId: getOperator
-      parameters:
-        - name: operatorCode
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Operator details
+    get: { summary: Operator, parameters: [{ name: operatorCode, in: path, required: true, schema: { type: string } }], responses: { '200': { $ref: '#/components/responses/Ok' } } }
+    put: { summary: Update (local identity changes require ADMIN), parameters: [{ name: operatorCode, in: path, required: true, schema: { type: string } }], responses: { '200': { $ref: '#/components/responses/Ok' }, '403': { $ref: '#/components/responses/Forbidden' } } }
   /api/operators/{operatorCode}/mark-down:
+    post: { summary: Hold traffic to the operator, parameters: [{ name: operatorCode, in: path, required: true, schema: { type: string } }], requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Reason' } } } }, responses: { '200': { $ref: '#/components/responses/Ok' }, '404': { $ref: '#/components/responses/NotFound' } } }
+  /api/operators/{operatorCode}/mark-up:
+    post: { summary: Release held traffic, parameters: [{ name: operatorCode, in: path, required: true, schema: { type: string } }], requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Reason' } } } }, responses: { '200': { $ref: '#/components/responses/Ok' }, '404': { $ref: '#/components/responses/NotFound' } } }
+  /api/operators/{operatorCode}/endpoints:
+    get: { summary: Peer endpoints, parameters: [{ name: operatorCode, in: path, required: true, schema: { type: string } }], responses: { '200': { $ref: '#/components/responses/Ok' } } }
     post:
-      summary: Mark operator down
-      operationId: markOperatorDown
-      parameters:
-        - name: operatorCode
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Operator marked down
-  /api/manual-tasks:
-    get:
-      summary: List manual tasks
-      operationId: listManualTasks
-      parameters:
-        - name: status
-          in: query
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Tasks
-  /api/manual-tasks/{taskUuid}/resolve:
-    post:
-      summary: Resolve a manual task
-      operationId: resolveManualTask
-      parameters:
-        - name: taskUuid
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                resolution:
-                  type: string
-      responses:
-        '200':
-          description: Task resolved
-  /api/numbers/{phoneNumber}:
-    get:
-      summary: Get number details
-      operationId: getNumber
-      parameters:
-        - name: phoneNumber
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Number details
-  /api/numbers/{phoneNumber}/history:
-    get:
-      summary: Get number ownership history
-      operationId: getNumberHistory
-      parameters:
-        - name: phoneNumber
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Ownership history
+      summary: Add endpoint (ADMIN); tlsSubject / ipAllowlist authenticate the peer's inbound traffic
+      parameters: [{ name: operatorCode, in: path, required: true, schema: { type: string } }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { endpointType: { type: string, example: NPG_INBOUND }, endpointUrl: { type: string }, tlsSubject: { type: string }, ipAllowlist: { type: string, description: comma-separated IPs/CIDRs }, isActive: { type: boolean } } } } } }
+      responses: { '200': { $ref: '#/components/responses/Ok' } }
+  /api/operators/{operatorCode}/endpoints/{endpointId}:
+    delete: { summary: Remove endpoint (ADMIN), parameters: [{ name: operatorCode, in: path, required: true, schema: { type: string } }, { name: endpointId, in: path, required: true, schema: { type: integer } }], responses: { '200': { $ref: '#/components/responses/Ok' } } }
+  /api/number-ranges:
+    get: { summary: Allocated number prefixes per operator, responses: { '200': { $ref: '#/components/responses/Ok' } } }
+    post: { summary: Add range (ADMIN), requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { operatorCode: { type: string }, prefix: { type: string, example: '0812' }, description: { type: string } } } } } }, responses: { '200': { $ref: '#/components/responses/Ok' }, '409': { $ref: '#/components/responses/Conflict' } } }
+  /api/number-ranges/{rangeId}:
+    delete: { summary: Remove range (ADMIN), parameters: [{ name: rangeId, in: path, required: true, schema: { type: integer } }], responses: { '200': { $ref: '#/components/responses/Ok' } } }
+  /api/users:
+    get: { summary: Users (ADMIN), responses: { '200': { $ref: '#/components/responses/Ok' } } }
+    post: { summary: Create user (ADMIN), responses: { '200': { $ref: '#/components/responses/Ok' } } }
+  /api/users/{username}:
+    put: { summary: Update user, roles or password (ADMIN), parameters: [{ name: username, in: path, required: true, schema: { type: string } }], responses: { '200': { $ref: '#/components/responses/Ok' } } }
+  /api/settings/local:
+    get: { summary: Local gateway settings (ADMIN), responses: { '200': { $ref: '#/components/responses/Ok' } } }
