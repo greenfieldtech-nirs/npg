@@ -5,7 +5,8 @@
 set -euo pipefail
 
 ENDPOINT="${ENDPOINT:-http://localhost:18081/np/inbound}"
-REQUEST_ID="${REQUEST_ID:-NPHLBZ260924417320100}"
+# unique per run, so a replay never collides with an earlier one
+REQUEST_ID="${REQUEST_ID:-NPHLBZ$(date -u +%y%m%d%H%M%S)$((RANDOM % 1000))}"
 FIXTURES="backend/src/test/resources/simulation"
 
 post() {

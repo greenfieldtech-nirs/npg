@@ -44,7 +44,9 @@ public class Application {
         Future<MongoClient> mongoFuture = MongoConfig.configure(vertx);
 
         Future.all(poolFuture, mongoFuture)
-            .compose(result -> cloud.cloudonix.npg.config.AuthSeeder.ensureSeeded(poolFuture.result()).map(result))
+            .compose(result -> ("api".equals(role) || "all".equals(role))
+                ? cloud.cloudonix.npg.config.AuthSeeder.ensureSeeded(poolFuture.result()).map(result)
+                : Future.succeededFuture(result))
             .compose(result -> {
                 Pool pool = poolFuture.result();
                 MongoClient mongoClient = mongoFuture.result();
@@ -88,6 +90,7 @@ public class Application {
                 }
                 return Future.succeededFuture(client);
             })
+            .compose(client -> vertx.deployVerticle(new cloud.cloudonix.npg.ops.HealthVerticle()).map(client))
             .onSuccess(v -> log.info("Application started in role: " + role))
             .onFailure(err -> {
                 log.error("Failed to start application", err);

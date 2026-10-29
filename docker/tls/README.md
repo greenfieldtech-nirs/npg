@@ -1,10 +1,17 @@
 # TLS material
 
-Place the edge certificate and private key here before enabling the HTTPS
-server block in `nginx/nginx.prod.conf`:
+Mounted read-only into the edge NGINX (`/etc/nginx/tls/`) by `docker/docker-compose.prod.yml`;
+ignored by git — never commit these files.
 
-- `cert.pem` — certificate chain
-- `key.pem` — private key
+| File | Purpose |
+|------|---------|
+| `cert.pem` | This gateway's server certificate chain (HTTPS for the console and for peers) |
+| `key.pem` | Its private key |
+| `peer-ca.pem` | CA bundle that issued peer operators' client certificates (mTLS on `/np`) |
 
-These files are mounted read-only into the NGINX container by
-`docker/docker-compose.prod.yml` and are ignored by git. Never commit them.
+After placing `peer-ca.pem`, configure each peer's endpoint `tls_subject` (exact subject DN, as
+NGINX reports it in `$ssl_client_s_dn`) and set `INBOUND_TRUST_PROXY_CLIENT_CERT=true`.
+Peers without client certificates can be authenticated by `ip_allowlist` instead.
+
+For outbound mTLS (our client certificate towards peers) set `OUTBOUND_TLS_KEYSTORE` (PKCS#12)
+and `OUTBOUND_TLS_KEYSTORE_PASSWORD`, and mount the keystore into the dispatcher container.

@@ -33,6 +33,8 @@ function readStored(): { token: string | null; user: AuthUser | null } {
   return { token, user }
 }
 
+// auth helpers live with their provider; fast refresh simply reloads this module
+// eslint-disable-next-line react-refresh/only-export-components
 export function clearStoredAuth() {
   localStorage.removeItem(TOKEN_KEY)
   localStorage.removeItem(USER_KEY)
@@ -88,6 +90,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   )
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useAuth(): AuthContextValue {
   const ctx = useContext(AuthContext)
   if (!ctx) throw new Error('useAuth must be used within AuthProvider')

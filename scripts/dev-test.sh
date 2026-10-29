@@ -15,6 +15,11 @@ for service in db mongo redis; do
 done
 echo "Database and cache services are healthy."
 
+# Tests get their own databases: a running dev backend (APP_ROLE=all) polls the npg database's
+# queues and would otherwise race the tests for their inbox, outbox and timer rows.
+docker exec npg-db mariadb -uroot -proot -e \
+  "CREATE DATABASE IF NOT EXISTS npg_test; GRANT ALL PRIVILEGES ON npg_test.* TO 'npg'@'%';"
+
 # Run the Maven test suite inside a transient JDK container attached to the dev network.
 # Maven is not included in the eclipse-temurin JRE/JDK Alpine images, so install it first.
 docker run --rm \
@@ -25,11 +30,11 @@ docker run --rm \
   -w /workspace \
   -e DB_HOST=npg-db \
   -e DB_PORT=3306 \
-  -e DB_NAME=npg \
+  -e DB_NAME=npg_test \
   -e DB_USER=npg \
   -e DB_PASSWORD=npg \
   -e MONGO_URI=mongodb://npg-mongo:27017 \
-  -e MONGO_DB=npg \
+  -e MONGO_DB=npg_test \
   -e REDIS_URI=redis://npg-redis:6379 \
   eclipse-temurin:21-jdk-alpine \
   sh -c "apk add --no-cache maven >/dev/null && mvn -B -q test ${MVN_ARGS:-}"

@@ -1,8 +1,20 @@
 <configuration>
+    <!-- Structured JSON logs. Every line carries the service and role; phone numbers are masked
+         (keeps the first 3 and last 2 digits), raw XML is never logged by the application. -->
+    <property name="APP_ROLE" value="${APP_ROLE:-all}"/>
     <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
-        <encoder class="net.logstash.logback.encoder.LogstashEncoder" />
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <customFields>{"service":"npg-backend","role":"${APP_ROLE}"}</customFields>
+            <jsonGeneratorDecorator class="net.logstash.logback.mask.MaskingJsonGeneratorDecorator">
+                <valueMasker class="net.logstash.logback.mask.RegexValueMasker">
+                    <regex>(?&lt;![\d])((?:972|0)\d{2})\d{4,6}(\d{2})(?![\d])</regex>
+                    <mask>$1****$2</mask>
+                </valueMasker>
+            </jsonGeneratorDecorator>
+        </encoder>
     </appender>
+    <logger name="org.mongodb.driver" level="WARN"/>
     <root level="${LOG_LEVEL:-INFO}">
-        <appender-ref ref="STDOUT" />
+        <appender-ref ref="STDOUT"/>
     </root>
 </configuration>

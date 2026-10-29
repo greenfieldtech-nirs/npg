@@ -1,130 +1,179 @@
-# NPG production compose.
+# NPG production stack: one backend image, one service per runtime role (docs/02).
 #
-# NOTE on nginx/TLS: `nginx/nginx.prod.conf` is mounted by default and serves
-# plain HTTP on port 80 with correct prod upstreams (api / inbound-gateway).
-# To enable TLS, uncomment the 443 server block in nginx.prod.conf and place
-# cert.pem/key.pem in ./tls/.
+#   ./npg -e production start        (uses docker/.env.production — copy the .example)
+#
+# Required secrets fail fast at `docker compose up` when missing (${VAR:?...}).
+# TLS material goes in docker/tls/ (see docker/tls/README.md).
+
+x-backend: &backend
+  build:
+    context: ..
+    dockerfile: backend/Dockerfile
+  image: npg-backend:${NPG_IMAGE_TAG:-latest}
+  restart: unless-stopped
+  depends_on:
+    mariadb: { condition: service_healthy }
+    mongodb: { condition: service_healthy }
+    redis: { condition: service_healthy }
+  networks: [backend]
+  deploy:
+    resources:
+      limits: { cpus: "1.0", memory: 768M }
+
+x-backend-env: &backend-env
+  NPG_ENV: production
+  DB_HOST: mariadb
+  DB_PORT: "3306"
+  DB_NAME: ${DB_NAME:-npg}
+  DB_USER: ${DB_USER:-npg}
+  DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in docker/.env.production}
+  DB_POOL_MAX_SIZE: ${DB_POOL_MAX_SIZE:-10}
+  MONGO_URI: mongodb://${MONGO_USER:-npg}:${MONGO_PASSWORD:?set MONGO_PASSWORD}@mongodb:27017/?authSource=admin
+  MONGO_DB: ${MONGO_DB:-npg}
+  REDIS_URI: redis://redis:6379
+  NPG_JWT_SECRET: ${NPG_JWT_SECRET:?set NPG_JWT_SECRET (at least 32 characters)}
+  NPG_ADMIN_USERNAME: ${NPG_ADMIN_USERNAME:-admin}
+  NPG_ADMIN_PASSWORD: ${NPG_ADMIN_PASSWORD:?set NPG_ADMIN_PASSWORD (at least 12 characters)}
+  TRUSTED_PROXIES: ${TRUSTED_PROXIES:-private}
+  INBOUND_AUTH_MODE: ${INBOUND_AUTH_MODE:-strict}
+  INBOUND_TRUST_PROXY_CLIENT_CERT: ${INBOUND_TRUST_PROXY_CLIENT_CERT:-false}
+  PORT_OUT_DECISION_MODE: ${PORT_OUT_DECISION_MODE:-MANUAL}
+  PORTING_KD_UPDATE_REQUIRED: ${PORTING_KD_UPDATE_REQUIRED:-false}
+  OUTBOUND_SAFE_RESEND_TYPES: ${OUTBOUND_SAFE_RESEND_TYPES:-Check,Inquire_number,Inquire_number_response,Down_system,Up_system,DB_synch_request}
+  APP_PUBLIC_BASE_URL: ${APP_PUBLIC_BASE_URL:-https://localhost}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
 services:
   nginx:
-    image: nginx:alpine
+    image: nginx:1.27-alpine
+    restart: unless-stopped
     ports:
       - "443:443"
       - "80:80"
     volumes:
       - ../nginx/nginx.prod.conf:/etc/nginx/conf.d/default.conf:ro
-      - ./tls/cert.pem:/etc/nginx/cert.pem:ro
-      - ./tls/key.pem:/etc/nginx/key.pem:ro
-    depends_on:
-      - api
-      - inbound-gateway
-      - frontend
+      - ./tls:/etc/nginx/tls:ro
+    depends_on: [api, inbound-gateway, frontend]
+    networks: [edge, backend]
 
   frontend:
     build:
       context: ../frontend
+    image: npg-frontend:${NPG_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    networks: [edge]
 
   api:
-    build:
-      context: ../backend
+    <<: *backend
     environment:
+      <<: *backend-env
       APP_ROLE: api
       API_PORT: "8080"
-      DB_HOST: ${DB_HOST}
-      DB_PORT: ${DB_PORT}
-      DB_NAME: ${DB_NAME}
-      DB_USER: ${DB_USER}
-      DB_PASSWORD: ${DB_PASSWORD}
-      MONGO_URI: ${MONGO_URI}
-      MONGO_DB: ${MONGO_DB}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    networks: [backend, edge]
     deploy:
       replicas: 2
+      resources:
+        limits: { cpus: "1.0", memory: 768M }
 
   inbound-gateway:
-    build:
-      context: ../backend
+    <<: *backend
     environment:
+      <<: *backend-env
       APP_ROLE: inbound
-      PORT: "8080"
-      DB_HOST: ${DB_HOST}
-      DB_PORT: ${DB_PORT}
-      DB_NAME: ${DB_NAME}
-      DB_USER: ${DB_USER}
-      DB_PASSWORD: ${DB_PASSWORD}
-      MONGO_URI: ${MONGO_URI}
-      MONGO_DB: ${MONGO_DB}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      PORT: "8081"
+    networks: [backend, edge]
     deploy:
       replicas: 2
+      resources:
+        limits: { cpus: "1.0", memory: 768M }
 
   worker:
-    build:
-      context: ../backend
+    <<: *backend
     environment:
+      <<: *backend-env
       APP_ROLE: worker
-      DB_HOST: ${DB_HOST}
-      DB_PORT: ${DB_PORT}
-      DB_NAME: ${DB_NAME}
-      DB_USER: ${DB_USER}
-      DB_PASSWORD: ${DB_PASSWORD}
-      MONGO_URI: ${MONGO_URI}
-      MONGO_DB: ${MONGO_DB}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-    deploy:
-      replicas: 3
-
-  timer-worker:
-    build:
-      context: ../backend
-    environment:
-      APP_ROLE: timer
-      DB_HOST: ${DB_HOST}
-      DB_PORT: ${DB_PORT}
-      DB_NAME: ${DB_NAME}
-      DB_USER: ${DB_USER}
-      DB_PASSWORD: ${DB_PASSWORD}
-      MONGO_URI: ${MONGO_URI}
-      MONGO_DB: ${MONGO_DB}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
     deploy:
       replicas: 2
+      resources:
+        limits: { cpus: "1.0", memory: 768M }
+
+  timer-worker:
+    <<: *backend
+    environment:
+      <<: *backend-env
+      APP_ROLE: timer
+    deploy:
+      replicas: 1
+      resources:
+        limits: { cpus: "0.5", memory: 512M }
 
   dispatcher:
-    build:
-      context: ../backend
+    <<: *backend
     environment:
+      <<: *backend-env
       APP_ROLE: dispatcher
-      DB_HOST: ${DB_HOST}
-      DB_PORT: ${DB_PORT}
-      DB_NAME: ${DB_NAME}
-      DB_USER: ${DB_USER}
-      DB_PASSWORD: ${DB_PASSWORD}
-      MONGO_URI: ${MONGO_URI}
-      MONGO_DB: ${MONGO_DB}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      OUTBOUND_TLS_KEYSTORE: ${OUTBOUND_TLS_KEYSTORE:-}
+      OUTBOUND_TLS_KEYSTORE_PASSWORD: ${OUTBOUND_TLS_KEYSTORE_PASSWORD:-}
+      OUTBOUND_TLS_TRUSTSTORE: ${OUTBOUND_TLS_TRUSTSTORE:-}
+      OUTBOUND_TLS_TRUSTSTORE_PASSWORD: ${OUTBOUND_TLS_TRUSTSTORE_PASSWORD:-}
+    volumes:
+      - ./tls:/app/tls:ro
     deploy:
-      replicas: 3
+      replicas: 2
+      resources:
+        limits: { cpus: "0.5", memory: 512M }
 
   mariadb:
     image: mariadb:10.11
+    restart: unless-stopped
+    command: mysqld --default-time-zone=+00:00
     environment:
-      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
-      MYSQL_DATABASE: ${DB_NAME}
-      MYSQL_USER: ${DB_USER}
-      MYSQL_PASSWORD: ${DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?set DB_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME:-npg}
+      MYSQL_USER: ${DB_USER:-npg}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD}
     volumes:
       - mariadb_data:/var/lib/mysql
+    networks: [backend]
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
 
   mongodb:
     image: mongo:7.0
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-npg}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:?set MONGO_PASSWORD}
     volumes:
       - mongodb_data:/data/db
+    networks: [backend]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
+    # cache and pub/sub only: nothing durable lives here (AGENTS.md)
     command: redis-server --appendonly no --save ""
-    deploy:
-      replicas: 1
+    networks: [backend]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  edge:
+  backend:
+    internal: true
 
 volumes:
   mariadb_data:

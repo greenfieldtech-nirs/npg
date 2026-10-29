@@ -10,6 +10,7 @@ import cloud.cloudonix.npg.audit.XmlAuditService;
 import cloud.cloudonix.npg.config.DatabaseConfig;
 import cloud.cloudonix.npg.config.MongoConfig;
 import cloud.cloudonix.npg.config.RedisConfig;
+import cloud.cloudonix.npg.ops.HealthVerticle;
 import cloud.cloudonix.npg.repository.AuditEventRepository;
 import cloud.cloudonix.npg.repository.CachedOperatorRepository;
 import cloud.cloudonix.npg.repository.OperatorRepository;
@@ -41,6 +42,8 @@ public class ManagementApiVerticle extends AbstractVerticle {
     static final long MAX_BODY_BYTES = 1024 * 1024;
 
     private JwtAuthHandler.Guard guard;
+    private Pool pool;
+    private MongoClient mongo;
     private final ClientAddress clientAddress = ClientAddress.fromEnvironment();
     private AuthApiHandler authApiHandler;
     private DashboardApiHandler dashboardApiHandler;
@@ -63,8 +66,9 @@ public class ManagementApiVerticle extends AbstractVerticle {
 
         Future.all(poolFuture, mongoFuture, redisFuture)
             .compose(v -> {
-                Pool pool = poolFuture.result();
-                XmlAuditService xmlAuditService = new XmlAuditService(mongoFuture.result());
+                pool = poolFuture.result();
+                mongo = mongoFuture.result();
+                XmlAuditService xmlAuditService = new XmlAuditService(mongo);
                 CacheService cacheService = new CacheService(redisFuture.result());
                 PubSubService pubSubService = new PubSubService(vertx, redisFuture.result());
                 JwtService jwt = JwtService.fromEnvironment();
@@ -106,7 +110,7 @@ public class ManagementApiVerticle extends AbstractVerticle {
         router.route().failureHandler(this::failure);
 
         router.get("/health/live").respond(ctx -> Future.succeededFuture("OK"));
-        router.get("/health/ready").respond(ctx -> Future.succeededFuture("OK"));
+        router.get("/health/ready").handler(ctx -> HealthVerticle.respondReadiness(ctx, pool, mongo));
 
         router.post("/api/auth/login").handler(this::login);
         router.get("/api/auth/me")
@@ -117,17 +121,6 @@ public class ManagementApiVerticle extends AbstractVerticle {
                     .putHeader("Content-Type", "application/json")
                     .end(authApiHandler.me(user.username(), user.roles()).encode());
             });
-
-        router.get("/metrics").handler(ctx -> {
-            JsonObject metrics = new JsonObject()
-                .put("inbound_messages_total", 0)
-                .put("outbound_messages_total", 0)
-                .put("inbox_pending_count", 0)
-                .put("outbox_pending_count", 0)
-                .put("timers_due_count", 0)
-                .put("manual_tasks_open_count", 0);
-            ctx.response().setStatusCode(200).putHeader("Content-Type", "application/json").end(metrics.encode());
-        });
 
         router.get("/api/dashboard")
             .handler(guard.authenticated())

@@ -70,7 +70,7 @@ public final class AuthSeeder {
                     return Future.failedFuture(e);
                 }
                 return pool.preparedQuery(
-                        "INSERT INTO np_users (username, display_name, password_hash) VALUES (?, ?, ?)")
+                        "INSERT IGNORE INTO np_users (username, display_name, password_hash) VALUES (?, ?, ?)")  // replicas may race
                     .execute(Tuple.of(username, "Administrator", PasswordService.hash(password)))
                     .mapEmpty();
             })

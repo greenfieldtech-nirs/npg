@@ -53,12 +53,13 @@ services:
 
   backend:
     build:
-      context: ../backend
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: backend/Dockerfile
     container_name: npg-backend
     ports:
       - "18080:8080"
       - "18081:8081"
+      - "19090:9090"
     environment:
       APP_ROLE: all
       NPG_ENV: dev
@@ -76,6 +77,8 @@ services:
       REDIS_URI: redis://redis:6379
       LOG_LEVEL: INFO
       CATALOG_PATH: /docs/protocol
+      NPG_JWT_SECRET: dev-only-jwt-secret-not-for-production-use
+      PORT_OUT_DECISION_MODE: AUTO_APPROVE
     volumes:
       - ../docs/protocol:/docs/protocol:ro
     networks:

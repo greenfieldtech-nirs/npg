@@ -1,0 +1,16 @@
+# Build context is the repository root; send only what the images need.
+**/node_modules
+**/target
+**/dist
+.git
+.github
+.remember
+workplans
+docs/prompts
+docs/superpowers
+docs/reference
+docs/release
+docker/tls
+docker/backups
+*.md
+!docs/protocol/*.md

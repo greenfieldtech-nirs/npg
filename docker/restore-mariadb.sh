@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
+# Restores a backup made by backup-mariadb.sh. Stop the backend roles first.
+#   docker/restore-mariadb.sh <backup.sql.gz> [container]
 set -euo pipefail
-CONTAINER=${1:-npg-db}
-BACKUP_FILE=${2:?"Usage: restore-mariadb.sh [container] <backup-file.sql>"}
-docker exec -i "$CONTAINER" mariadb -u npg -pnpg npg < "$BACKUP_FILE"
-echo "Restored $BACKUP_FILE into $CONTAINER"
+FILE=${1:?usage: restore-mariadb.sh <backup.sql.gz> [container]}
+CONTAINER=${2:-npg-db}
+: "${DB_PASSWORD:?set DB_PASSWORD}"
+DB_USER=${DB_USER:-npg}
+DB_NAME=${DB_NAME:-npg}
+gunzip -c "$FILE" | docker exec -i -e MYSQL_PWD="$DB_PASSWORD" "$CONTAINER" mariadb -u "$DB_USER" "$DB_NAME"
+echo "Restored $FILE into $DB_NAME"

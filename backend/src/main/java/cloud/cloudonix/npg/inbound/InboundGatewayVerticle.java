@@ -6,6 +6,7 @@ import cloud.cloudonix.npg.audit.XmlTransportMetadata;
 import cloud.cloudonix.npg.config.DatabaseConfig;
 import cloud.cloudonix.npg.config.Env;
 import cloud.cloudonix.npg.config.MongoConfig;
+import cloud.cloudonix.npg.ops.HealthVerticle;
 import cloud.cloudonix.npg.protocol.ProtocolCatalogLoader;
 import cloud.cloudonix.npg.security.ClientAddress;
 import io.vertx.core.AbstractVerticle;
@@ -49,11 +50,7 @@ public class InboundGatewayVerticle extends AbstractVerticle {
                 router.route().handler(BodyHandler.create().setBodyLimit(1024 * 1024));
                 router.post("/np/inbound").handler(ctx -> handleInbound(ctx, service, catalogLoader));
                 router.get("/health/live").handler(ctx -> ctx.response().setStatusCode(200).end("OK"));
-                router.get("/health/ready").handler(ctx -> ctx.response().setStatusCode(200).end("OK"));
-                router.get("/metrics").handler(ctx ->
-                    ctx.response().setStatusCode(200)
-                        .putHeader("Content-Type", "application/json")
-                        .end(new JsonObject().put("inbound_messages_total", 0).encode()));
+                router.get("/health/ready").handler(ctx -> HealthVerticle.respondReadiness(ctx, pool, mongoClient));
 
                 return vertx.createHttpServer()
                     .requestHandler(router)
