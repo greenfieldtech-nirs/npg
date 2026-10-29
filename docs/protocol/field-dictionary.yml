@@ -1,0 +1,113 @@
+version: "4.0"
+source: "אפיון IT עבור ניידות מספרים, גרסה 4.0 (scanned PDF)"
+generated: "2026-06-15"
+fields:
+  sender_operator:
+    type: string
+    max_length: 32
+    description: Code of the operator sending the message
+    example: "OP01"
+  receiver_operator:
+    type: string
+    max_length: 32
+    description: Code of the operator receiving the message
+    example: "OP02"
+  message_type:
+    type: string
+    max_length: 64
+    description: Protocol message type name
+    example: "Check"
+  request_id:
+    type: string
+    max_length: 128
+    description: Unique identifier for the business request
+    example: "REQ-2026-000001"
+  transaction_id:
+    type: string
+    max_length: 128
+    description: Unique identifier for this specific message
+    example: "TX-2026-000001-A"
+  correlation_id:
+    type: string
+    max_length: 128
+    description: Links a response to the original request
+    example: "TX-2026-000001-A"
+  timestamp:
+    type: datetime
+    format: ISO-8601
+    description: Message creation timestamp in UTC
+    example: "2026-06-15T10:00:00Z"
+  protocol_version:
+    type: string
+    max_length: 32
+    description: Protocol version
+    example: "4.0"
+  phone_number:
+    type: string
+    max_length: 32
+    description: Israeli phone number
+    example: "972501234567"
+  response_code:
+    type: string
+    max_length: 64
+    description: Business response code (APPROVED/REJECTED/other)
+    example: "APPROVED"
+  requested_port_time:
+    type: datetime
+    format: ISO-8601
+    description: Requested port execution time
+    example: "2026-06-20T08:00:00Z"
+  approved_port_time:
+    type: datetime
+    format: ISO-8601
+    description: Approved port execution time
+    example: "2026-06-20T08:00:00Z"
+  execution_time:
+    type: datetime
+    format: ISO-8601
+    description: Actual execution time
+    example: "2026-06-20T08:00:00Z"
+  new_port_time:
+    type: datetime
+    format: ISO-8601
+    description: Updated port time
+    example: "2026-06-21T08:00:00Z"
+  reason:
+    type: string
+    max_length: 1024
+    description: Human-readable reason for cancellation, maintenance, etc.
+    example: "Customer requested cancellation"
+  new_operator:
+    type: string
+    max_length: 32
+    description: Operator code that now owns the number
+    example: "OP02"
+  current_operator:
+    type: string
+    max_length: 32
+    description: Operator code that currently owns the number
+    example: "OP02"
+  sync_type:
+    type: string
+    max_length: 64
+    description: Type of database synchronization requested
+    example: "FULL"
+  date_range:
+    type: object
+    description: Start and end dates for a partial sync
+    example: "{start: '2026-01-01', end: '2026-06-15'}"
+  file_reference:
+    type: string
+    max_length: 1024
+    description: Reference to a synchronization file
+    example: "sftp://operator.example.com/sync/20260615.xml"
+  expected_duration:
+    type: string
+    max_length: 64
+    description: Expected maintenance duration
+    example: "PT2H"
+
+open_questions:
+  - "Confirm exact field names in the official XSD."
+  - "Confirm required vs optional fields per message type."
+  - "Confirm phone number normalization rules."

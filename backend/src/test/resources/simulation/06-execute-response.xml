@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<npMessageBody xmlns="">
+    <Execute_response>
+        <positiveApproval>
+            <approvalInd>Y</approvalInd>
+            <disconnectDateTime>2026-09-24T16:49:58+03:00</disconnectDateTime>
+        </positiveApproval>
+        <requestTrxNo>HL000163464488</requestTrxNo>
+    </Execute_response>
+</npMessageBody>

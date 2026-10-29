@@ -1,0 +1,120 @@
+version: "4.0"
+source: "אפיון IT עבור ניידות מספרים, גרסה 4.0 (scanned PDF)"
+generated: "2026-06-15"
+timers:
+  - name: CHECK_RESPONSE_TIMEOUT
+    meaning: Time allowed for donor to respond to a Check message
+    starts_on: check_sent
+    stops_on: check_response_received
+    duration: "configurable"
+    working_hours_sensitive: true
+    timeout_action: retry_or_manual_review
+    source_confidence: scanned_spec_requires_confirmation
+
+  - name: REQUEST_RESPONSE_TIMEOUT
+    meaning: Time allowed for donor to respond to a Request message
+    starts_on: request_sent
+    stops_on: request_response_received
+    duration: "configurable"
+    working_hours_sensitive: true
+    timeout_action: retry_or_manual_review
+    source_confidence: scanned_spec_requires_confirmation
+
+  - name: UPDATE_RESPONSE_TIMEOUT
+    meaning: Time allowed for donor to respond to an Update message
+    starts_on: update_sent
+    stops_on: update_response_received
+    duration: "configurable"
+    working_hours_sensitive: true
+    timeout_action: retry_or_manual_review
+    source_confidence: scanned_spec_requires_confirmation
+
+  - name: CANCEL_RESPONSE_TIMEOUT
+    meaning: Time allowed for donor to respond to a Cancel message
+    starts_on: cancel_sent
+    stops_on: cancel_response_received
+    duration: "configurable"
+    working_hours_sensitive: true
+    timeout_action: retry_or_manual_review
+    source_confidence: scanned_spec_requires_confirmation
+
+  - name: KD_UPDATE_RESPONSE_TIMEOUT
+    meaning: Time allowed for donor to respond to a KD_update message
+    starts_on: kd_update_sent
+    stops_on: kd_update_response_received
+    duration: "configurable"
+    working_hours_sensitive: true
+    timeout_action: retry_or_manual_review
+    source_confidence: scanned_spec_requires_confirmation
+
+  - name: EXECUTION_RESPONSE_TIMEOUT
+    meaning: Time allowed for recipient to respond to an Execute message
+    starts_on: execute_sent
+    stops_on: execute_response_received
+    duration: "configurable"
+    working_hours_sensitive: true
+    timeout_action: retry_or_manual_review
+    source_confidence: scanned_spec_requires_confirmation
+
+  - name: PUBLICATION_RESPONSE_TIMEOUT
+    meaning: Time allowed for each publication recipient to respond
+    starts_on: publish_pending
+    stops_on: publish_response_received
+    duration: "configurable"
+    working_hours_sensitive: true
+    timeout_action: retry_or_manual_review
+    source_confidence: scanned_spec_requires_confirmation
+
+  - name: CANCEL_PUBLISH_RESPONSE_TIMEOUT
+    meaning: Time allowed for each publication recipient to respond to Cancel_Publish
+    starts_on: cancel_publish_sent
+    stops_on: cancel_publish_response_received
+    duration: "configurable"
+    working_hours_sensitive: true
+    timeout_action: retry_or_manual_review
+    source_confidence: scanned_spec_requires_confirmation
+
+  - name: RETURN_RESPONSE_TIMEOUT
+    meaning: Time allowed for original operator to respond to Return
+    starts_on: return_sent
+    stops_on: return_response_received
+    duration: "configurable"
+    working_hours_sensitive: true
+    timeout_action: retry_or_manual_review
+    source_confidence: scanned_spec_requires_confirmation
+
+  - name: RETURN_COOLING_PERIOD
+    meaning: Mandatory cooling period before a disconnected number can be returned
+    starts_on: number_disconnected
+    stops_on: return_ready
+    duration: "configurable"
+    working_hours_sensitive: false
+    timeout_action: allow_return
+    source_confidence: scanned_spec_requires_confirmation
+
+  - name: INQUIRY_RESPONSE_TIMEOUT
+    meaning: Time allowed for operator to respond to an Inquire_number message
+    starts_on: inquire_number_sent
+    stops_on: inquire_number_response_received
+    duration: "configurable"
+    working_hours_sensitive: true
+    timeout_action: retry_or_manual_review
+    source_confidence: scanned_spec_requires_confirmation
+
+  - name: MAINTENANCE_WINDOW_TIMEOUT
+    meaning: Maximum duration before an operator marked down must be manually reviewed
+    starts_on: down_system_received
+    stops_on: up_system_received
+    duration: "configurable"
+    working_hours_sensitive: false
+    timeout_action: manual_review
+    source_confidence: scanned_spec_requires_confirmation
+
+  - name: SYNCH_RESPONSE_TIMEOUT
+    meaning: Time allowed for operator to respond to a DB_synch_request
+    starts_on: db_synch_request_sent
+    stops_on: db_synch_response_received
+    duration: "configurable"
+    working_hours_sensitive: true
+    timeout_action: retry_or_manual_review
+    source_confidence: scanned_spec_requires_confirmation

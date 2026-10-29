@@ -1,0 +1,744 @@
+version: "4.0"
+source: "אפיון IT עבור ניידות מספרים, גרסה 4.0 (scanned PDF)"
+generated: "2026-06-15"
+messages:
+  - name: Check
+    family: PORTING
+    directionality: OPERATOR_TO_OPERATOR
+    sender_role: RECIPIENT_OPERATOR
+    receiver_role: DONOR_OPERATOR
+    ack_required: true
+    business_response: Check_response
+    xml_schema: null
+    required_header_fields:
+      - sender_operator
+      - receiver_operator
+      - message_type
+      - request_id
+      - transaction_id
+      - timestamp
+      - protocol_version
+    required_body_fields:
+      - phone_number
+    starts_timers:
+      - CHECK_RESPONSE_TIMEOUT
+    stops_timers: []
+    allowed_workflow_states:
+      - NEW
+    resulting_states:
+      - CHECK_SENT
+    notes:
+      - "Initiates an eligibility check from the gaining operator to the losing operator."
+    open_questions:
+      - "Confirm exact XSD element names and namespace."
+      - "Confirm whether phone number is in body or header."
+
+  - name: Check_response
+    family: PORTING
+    directionality: OPERATOR_TO_OPERATOR
+    sender_role: DONOR_OPERATOR
+    receiver_role: RECIPIENT_OPERATOR
+    ack_required: true
+    business_response: null
+    xml_schema: null
+    required_header_fields:
+      - sender_operator
+      - receiver_operator
+      - message_type
+      - request_id
+      - transaction_id
+      - correlation_id
+      - timestamp
+      - protocol_version
+    required_body_fields:
+      - phone_number
+      - response_code
+    starts_timers: []
+    stops_timers:
+      - CHECK_RESPONSE_TIMEOUT
+    allowed_workflow_states:
+      - CHECK_SENT
+    resulting_states:
+      - CHECK_APPROVED
+      - CHECK_REJECTED
+    notes:
+      - "Business response to Check. May approve or reject eligibility."
+    open_questions:
+      - "Confirm exact approval/rejection code values."
+
+  - name: Request
+    family: PORTING
+    directionality: OPERATOR_TO_OPERATOR
+    sender_role: RECIPIENT_OPERATOR
+    receiver_role: DONOR_OPERATOR
+    ack_required: true
+    business_response: Request_response
+    xml_schema: null
+    required_header_fields:
+      - sender_operator
+      - receiver_operator
+      - message_type
+      - request_id
+      - transaction_id
+      - timestamp
+      - protocol_version
+    required_body_fields:
+      - phone_number
+      - requested_port_time
+    starts_timers:
+      - REQUEST_RESPONSE_TIMEOUT
+    stops_timers: []
+    allowed_workflow_states:
+      - CHECK_APPROVED
+    resulting_states:
+      - REQUEST_SENT
+    notes:
+      - "Formal porting request after eligibility check is approved."
+    open_questions:
+      - "Confirm date/time format and timezone handling."
+
+  - name: Request_response
+    family: PORTING
+    directionality: OPERATOR_TO_OPERATOR
+    sender_role: DONOR_OPERATOR
+    receiver_role: RECIPIENT_OPERATOR
+    ack_required: true
+    business_response: null
+    xml_schema: null
+    required_header_fields:
+      - sender_operator
+      - receiver_operator
+      - message_type
+      - request_id
+      - transaction_id
+      - correlation_id
+      - timestamp
+      - protocol_version
+    required_body_fields:
+      - phone_number
+      - response_code
+      - approved_port_time
+    starts_timers: []
+    stops_timers:
+      - REQUEST_RESPONSE_TIMEOUT
+    allowed_workflow_states:
+      - REQUEST_SENT
+    resulting_states:
+      - REQUEST_APPROVED
+      - REQUEST_REJECTED
+    notes:
+      - "Business response to Request."
+    open_questions: []
+
+  - name: Update
+    family: PORTING
+    directionality: OPERATOR_TO_OPERATOR
+    sender_role: RECIPIENT_OPERATOR
+    receiver_role: DONOR_OPERATOR
+    ack_required: true
+    business_response: Update_response
+    xml_schema: null
+    required_header_fields:
+      - sender_operator
+      - receiver_operator
+      - message_type
+      - request_id
+      - transaction_id
+      - correlation_id
+      - timestamp
+      - protocol_version
+    required_body_fields:
+      - phone_number
+      - new_port_time
+    starts_timers:
+      - UPDATE_RESPONSE_TIMEOUT
+    stops_timers: []
+    allowed_workflow_states:
+      - PORT_SCHEDULED
+    resulting_states:
+      - UPDATE_SENT
+    notes:
+      - "Request to change an already scheduled port time."
+    open_questions: []
+
+  - name: Update_response
+    family: PORTING
+    directionality: OPERATOR_TO_OPERATOR
+    sender_role: DONOR_OPERATOR
+    receiver_role: RECIPIENT_OPERATOR
+    ack_required: true
+    business_response: null
+    xml_schema: null
+    required_header_fields:
+      - sender_operator
+      - receiver_operator
+      - message_type
+      - request_id
+      - transaction_id
+      - correlation_id
+      - timestamp
+      - protocol_version
+    required_body_fields:
+      - phone_number
+      - response_code
+      - approved_port_time
+    starts_timers: []
+    stops_timers:
+      - UPDATE_RESPONSE_TIMEOUT
+    allowed_workflow_states:
+      - UPDATE_SENT
+    resulting_states:
+      - UPDATE_APPROVED
+      - UPDATE_REJECTED
+    notes:
+      - "Business response to Update."
+    open_questions: []
+
+  - name: Cancel
+    family: PORTING
+    directionality: OPERATOR_TO_OPERATOR
+    sender_role: RECIPIENT_OPERATOR
+    receiver_role: DONOR_OPERATOR
+    ack_required: true
+    business_response: Cancel_response
+    xml_schema: null
+    required_header_fields:
+      - sender_operator
+      - receiver_operator
+      - message_type
+      - request_id
+      - transaction_id
+      - correlation_id
+      - timestamp
+      - protocol_version
+    required_body_fields:
+      - phone_number
+      - reason
+    starts_timers:
+      - CANCEL_RESPONSE_TIMEOUT
+    stops_timers: []
+    allowed_workflow_states:
+      - PORT_SCHEDULED
+      - REQUEST_APPROVED
+    resulting_states:
+      - CANCEL_SENT
+    notes:
+      - "Cancellation request before execution."
+    open_questions: []
+
+  - name: Cancel_response
+    family: PORTING
+    directionality: OPERATOR_TO_OPERATOR
+    sender_role: DONOR_OPERATOR
+    receiver_role: RECIPIENT_OPERATOR
+    ack_required: true
+    business_response: null
+    xml_schema: null
+    required_header_fields:
+      - sender_operator
+      - receiver_operator
+      - message_type
+      - request_id
+      - transaction_id
+      - correlation_id
+      - timestamp
+      - protocol_version
+    required_body_fields:
+      - phone_number
+      - response_code
+    starts_timers: []
+    stops_timers:
+      - CANCEL_RESPONSE_TIMEOUT
+    allowed_workflow_states:
+      - CANCEL_SENT
+    resulting_states:
+      - CANCELLED
+      - PORT_SCHEDULED
+    notes:
+      - "Business response to Cancel."
+    open_questions: []
+
+  - name: KD_update
+    family: PORTING
+    directionality: OPERATOR_TO_OPERATOR
+    sender_role: RECIPIENT_OPERATOR
+    receiver_role: DONOR_OPERATOR
+    ack_required: true
+    business_response: KD_update_response
+    xml_schema: null
+    required_header_fields:
+      - sender_operator
+      - receiver_operator
+      - message_type
+      - request_id
+      - transaction_id
+      - timestamp
+      - protocol_version
+    required_body_fields:
+      - phone_number
+    starts_timers:
+      - KD_UPDATE_RESPONSE_TIMEOUT
+    stops_timers: []
+    allowed_workflow_states:
+      - REQUEST_APPROVED
+    resulting_states:
+      - KD_UPDATE_SENT
+    notes:
+      - "Ministry of Defense update."
+    open_questions:
+      - "Confirm whether MoD update blocks porting or is informational."
+
+  - name: KD_update_response
+    family: PORTING
+    directionality: OPERATOR_TO_OPERATOR
+    sender_role: DONOR_OPERATOR
+    receiver_role: RECIPIENT_OPERATOR
+    ack_required: true
+    business_response: null
+    xml_schema: null
+    required_header_fields:
+      - sender_operator
+      - receiver_operator
+      - message_type
+      - request_id
+      - transaction_id
+      - correlation_id
+      - timestamp
+      - protocol_version
+    required_body_fields:
+      - phone_number
+      - response_code
+    starts_timers: []
+    stops_timers:
+      - KD_UPDATE_RESPONSE_TIMEOUT
+    allowed_workflow_states:
+      - KD_UPDATE_SENT
+    resulting_states:
+      - PORT_SCHEDULED
+    notes:
+      - "Response to MoD update."
+    open_questions: []
+
+  - name: Execute
+    family: PORTING
+    directionality: OPERATOR_TO_OPERATOR
+    sender_role: DONOR_OPERATOR
+    receiver_role: RECIPIENT_OPERATOR
+    ack_required: true
+    business_response: Execute_response
+    xml_schema: null
+    required_header_fields:
+      - sender_operator
+      - receiver_operator
+      - message_type
+      - request_id
+      - transaction_id
+      - correlation_id
+      - timestamp
+      - protocol_version
+    required_body_fields:
+      - phone_number
+      - execution_time
+    starts_timers:
+      - EXECUTION_RESPONSE_TIMEOUT
+    stops_timers: []
+    allowed_workflow_states:
+      - PORT_SCHEDULED
+    resulting_states:
+      - EXECUTION_SENT
+    notes:
+      - "Donor executes the port at the scheduled time."
+    open_questions: []
+
+  - name: Execute_response
+    family: PORTING
+    directionality: OPERATOR_TO_OPERATOR
+    sender_role: RECIPIENT_OPERATOR
+    receiver_role: DONOR_OPERATOR
+    ack_required: true
+    business_response: null
+    xml_schema: null
+    required_header_fields:
+      - sender_operator
+      - receiver_operator
+      - message_type
+      - request_id
+      - transaction_id
+      - correlation_id
+      - timestamp
+      - protocol_version
+    required_body_fields:
+      - phone_number
+      - response_code
+    starts_timers: []
+    stops_timers:
+      - EXECUTION_RESPONSE_TIMEOUT
+    allowed_workflow_states:
+      - EXECUTION_SENT
+    resulting_states:
+      - EXECUTION_CONFIRMED
+    notes:
+      - "Recipient confirms execution."
+    open_questions: []
+
+  - name: Publish
+    family: PUBLICATION
+    directionality: MULTICAST
+    sender_role: CURRENT_OPERATOR
+    receiver_role: ALL_OPERATORS
+    ack_required: true
+    business_response: Publish_response
+    xml_schema: null
+    required_header_fields:
+      - sender_operator
+      - message_type
+      - request_id
+      - transaction_id
+      - timestamp
+      - protocol_version
+    required_body_fields:
+      - phone_number
+      - new_operator
+    starts_timers:
+      - PUBLICATION_RESPONSE_TIMEOUT
+    stops_timers: []
+    allowed_workflow_states:
+      - EXECUTION_CONFIRMED
+      - RETURN_APPROVED
+    resulting_states:
+      - PUBLISH_PENDING
+    notes:
+      - "Multi-recipient notification that a number has been ported."
+      - "May also be sent after a successful number return (RETURN_APPROVED) to publish the returned number."
+    open_questions:
+      - "Confirm exact recipient set (all operators vs. a configured list)."
+
+  - name: Publish_response
+    family: PUBLICATION
+    directionality: OPERATOR_TO_OPERATOR
+    sender_role: ANY_OPERATOR
+    receiver_role: CURRENT_OPERATOR
+    ack_required: true
+    business_response: null
+    xml_schema: null
+    required_header_fields:
+      - sender_operator
+      - receiver_operator
+      - message_type
+      - request_id
+      - transaction_id
+      - correlation_id
+      - timestamp
+      - protocol_version
+    required_body_fields:
+      - phone_number
+      - response_code
+    starts_timers: []
+    stops_timers:
+      - PUBLICATION_RESPONSE_TIMEOUT
+    allowed_workflow_states:
+      - PUBLISH_SENT
+    resulting_states:
+      - PARTIALLY_PUBLISHED
+      - PUBLISHED
+    notes:
+      - "Per-recipient response to Publish."
+    open_questions: []
+
+  - name: Cancel_Publish
+    family: PUBLICATION_CANCELLATION
+    directionality: MULTICAST
+    sender_role: CURRENT_OPERATOR
+    receiver_role: ALL_OPERATORS
+    ack_required: true
+    business_response: Cancel_Publish_response
+    xml_schema: null
+    required_header_fields:
+      - sender_operator
+      - message_type
+      - request_id
+      - transaction_id
+      - correlation_id
+      - timestamp
+      - protocol_version
+    required_body_fields:
+      - phone_number
+    starts_timers:
+      - CANCEL_PUBLISH_RESPONSE_TIMEOUT
+    stops_timers: []
+    allowed_workflow_states:
+      - PUBLISHED
+    resulting_states:
+      - CANCEL_PUBLISH_SENT
+    notes:
+      - "Cancels a previously published port."
+    open_questions: []
+
+  - name: Cancel_Publish_response
+    family: PUBLICATION_CANCELLATION
+    directionality: OPERATOR_TO_OPERATOR
+    sender_role: ANY_OPERATOR
+    receiver_role: CURRENT_OPERATOR
+    ack_required: true
+    business_response: null
+    xml_schema: null
+    required_header_fields:
+      - sender_operator
+      - receiver_operator
+      - message_type
+      - request_id
+      - transaction_id
+      - correlation_id
+      - timestamp
+      - protocol_version
+    required_body_fields:
+      - phone_number
+      - response_code
+    starts_timers: []
+    stops_timers:
+      - CANCEL_PUBLISH_RESPONSE_TIMEOUT
+    allowed_workflow_states:
+      - CANCEL_PUBLISH_SENT
+    resulting_states:
+      - PUBLICATION_CANCELLED
+    notes:
+      - "Per-recipient response to Cancel_Publish."
+    open_questions: []
+
+  - name: Return
+    family: NUMBER_RETURN
+    directionality: OPERATOR_TO_OPERATOR
+    sender_role: CURRENT_OPERATOR
+    receiver_role: ORIGINAL_OPERATOR
+    ack_required: true
+    business_response: Return_response
+    xml_schema: null
+    required_header_fields:
+      - sender_operator
+      - receiver_operator
+      - message_type
+      - request_id
+      - transaction_id
+      - timestamp
+      - protocol_version
+    required_body_fields:
+      - phone_number
+    starts_timers:
+      - RETURN_RESPONSE_TIMEOUT
+    stops_timers: []
+    allowed_workflow_states:
+      - RETURN_READY
+    resulting_states:
+      - RETURN_SENT
+    notes:
+      - "Returns a disconnected number to the original operator."
+    open_questions:
+      - "Confirm cooling-period duration."
+
+  - name: Return_response
+    family: NUMBER_RETURN
+    directionality: OPERATOR_TO_OPERATOR
+    sender_role: ORIGINAL_OPERATOR
+    receiver_role: CURRENT_OPERATOR
+    ack_required: true
+    business_response: null
+    xml_schema: null
+    required_header_fields:
+      - sender_operator
+      - receiver_operator
+      - message_type
+      - request_id
+      - transaction_id
+      - correlation_id
+      - timestamp
+      - protocol_version
+    required_body_fields:
+      - phone_number
+      - response_code
+    starts_timers: []
+    stops_timers:
+      - RETURN_RESPONSE_TIMEOUT
+    allowed_workflow_states:
+      - RETURN_SENT
+    resulting_states:
+      - RETURN_APPROVED
+    notes:
+      - "Original operator accepts the return."
+    open_questions: []
+
+  - name: Inquire_number
+    family: NUMBER_INQUIRY
+    directionality: OPERATOR_TO_OPERATOR
+    sender_role: ANY_OPERATOR
+    receiver_role: ANY_OPERATOR
+    ack_required: true
+    business_response: Inquire_number_response
+    xml_schema: null
+    required_header_fields:
+      - sender_operator
+      - receiver_operator
+      - message_type
+      - request_id
+      - transaction_id
+      - timestamp
+      - protocol_version
+    required_body_fields:
+      - phone_number
+    starts_timers:
+      - INQUIRY_RESPONSE_TIMEOUT
+    stops_timers: []
+    allowed_workflow_states: []
+    resulting_states:
+      - INQUIRY_SENT
+    notes:
+      - "Asks another operator for current ownership of a number."
+    open_questions: []
+
+  - name: Inquire_number_response
+    family: NUMBER_INQUIRY
+    directionality: OPERATOR_TO_OPERATOR
+    sender_role: ANY_OPERATOR
+    receiver_role: ANY_OPERATOR
+    ack_required: true
+    business_response: null
+    xml_schema: null
+    required_header_fields:
+      - sender_operator
+      - receiver_operator
+      - message_type
+      - request_id
+      - transaction_id
+      - correlation_id
+      - timestamp
+      - protocol_version
+    required_body_fields:
+      - phone_number
+      - current_operator
+      - response_code
+    starts_timers: []
+    stops_timers:
+      - INQUIRY_RESPONSE_TIMEOUT
+    allowed_workflow_states:
+      - INQUIRY_SENT
+    resulting_states:
+      - INQUIRY_COMPLETED
+    notes:
+      - "Response with current operator information."
+    open_questions: []
+
+  - name: Down_system
+    family: MAINTENANCE
+    directionality: BROADCAST
+    sender_role: ANY_OPERATOR
+    receiver_role: ALL_OPERATORS
+    ack_required: true
+    business_response: null
+    xml_schema: null
+    required_header_fields:
+      - sender_operator
+      - message_type
+      - request_id
+      - transaction_id
+      - timestamp
+      - protocol_version
+    required_body_fields:
+      - reason
+      - expected_duration
+    starts_timers:
+      - MAINTENANCE_WINDOW_TIMEOUT
+    stops_timers: []
+    allowed_workflow_states: []
+    resulting_states:
+      - OPERATOR_MARKED_DOWN
+    notes:
+      - "Notification that an operator is going down for maintenance."
+    open_questions: []
+
+  - name: Up_system
+    family: MAINTENANCE
+    directionality: BROADCAST
+    sender_role: ANY_OPERATOR
+    receiver_role: ALL_OPERATORS
+    ack_required: true
+    business_response: null
+    xml_schema: null
+    required_header_fields:
+      - sender_operator
+      - message_type
+      - request_id
+      - transaction_id
+      - correlation_id
+      - timestamp
+      - protocol_version
+    required_body_fields:
+      - reason
+    starts_timers: []
+    stops_timers:
+      - MAINTENANCE_WINDOW_TIMEOUT
+    allowed_workflow_states: []
+    resulting_states:
+      - OPERATOR_MARKED_UP
+    notes:
+      - "Notification that an operator is back up."
+    open_questions: []
+
+  - name: DB_synch_request
+    family: DATA_SYNCHRONIZATION
+    directionality: OPERATOR_TO_OPERATOR
+    sender_role: ANY_OPERATOR
+    receiver_role: ANY_OPERATOR
+    ack_required: true
+    business_response: DB_synch_response
+    xml_schema: null
+    required_header_fields:
+      - sender_operator
+      - receiver_operator
+      - message_type
+      - request_id
+      - transaction_id
+      - timestamp
+      - protocol_version
+    required_body_fields:
+      - sync_type
+      - date_range
+    starts_timers:
+      - SYNCH_RESPONSE_TIMEOUT
+    stops_timers: []
+    allowed_workflow_states: []
+    resulting_states:
+      - SYNC_REQUESTED
+    notes:
+      - "Requests a database synchronization file."
+    open_questions:
+      - "Confirm transport (FTP/SFTP/HTTPS) for sync files."
+
+  - name: DB_synch_response
+    family: DATA_SYNCHRONIZATION
+    directionality: OPERATOR_TO_OPERATOR
+    sender_role: ANY_OPERATOR
+    receiver_role: ANY_OPERATOR
+    ack_required: true
+    business_response: null
+    xml_schema: null
+    required_header_fields:
+      - sender_operator
+      - receiver_operator
+      - message_type
+      - request_id
+      - transaction_id
+      - correlation_id
+      - timestamp
+      - protocol_version
+    required_body_fields:
+      - response_code
+      - file_reference
+    starts_timers: []
+    stops_timers:
+      - SYNCH_RESPONSE_TIMEOUT
+    allowed_workflow_states:
+      - SYNC_REQUESTED
+    resulting_states:
+      - SYNC_COMPLETED
+    notes:
+      - "Response containing a reference to the sync file."
+    open_questions: []

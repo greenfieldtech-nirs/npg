@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build backend image
+        run: docker compose -f docker/docker-compose.dev.yml build backend
+
+      - name: Ensure dev-test script is executable
+        run: chmod +x ./scripts/dev-test.sh
+
+      - name: Run backend tests in container
+        run: ./scripts/dev-test.sh
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Lint, typecheck, and build frontend in container
+        run: |
+          docker run --rm -v "$PWD/frontend:/app" -w /app node:20-alpine sh -c "npm ci && npm run lint && npm run typecheck && npm run build"
+
+  stack:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Start dev stack
+        run: docker compose -f docker/docker-compose.dev.yml up --build -d
+
+      - name: Wait for backend
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:18080/health/live > /dev/null 2>&1; then exit 0; fi
+            sleep 2
+          done
+          echo "Backend did not become healthy" >&2
+          docker compose -f docker/docker-compose.dev.yml logs backend
+          exit 1
+
+      - name: Health checks
+        run: |
+          curl -sf http://localhost:18080/health/live
+          curl -sf http://localhost:18080/health/ready
+          curl -sf http://localhost:18080/metrics
+          curl -sf http://localhost:18080/api/operators
+
+      - name: Stop dev stack
+        if: always()
+        run: docker compose -f docker/docker-compose.dev.yml down

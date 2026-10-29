@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<npMessageBody xmlns="">
+    <Publish_response>
+        <positiveApproval>
+            <approvalInd>Y</approvalInd>
+            <routeDateTime>2026-09-24T16:50:08</routeDateTime>
+        </positiveApproval>
+        <requestTrxNo>HL000163468556</requestTrxNo>
+    </Publish_response>
+</npMessageBody>

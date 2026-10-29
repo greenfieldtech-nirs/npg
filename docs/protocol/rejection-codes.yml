@@ -1,0 +1,85 @@
+version: "4.0"
+source: "אפיון IT עבור ניידות מספרים, גרסה 4.0 (scanned PDF)"
+generated: "2026-06-15"
+notes: "Exact rejection codes must be confirmed from the official specification."
+technical_rejection_codes:
+  - code: NACK_INVALID_XML
+    layer: TRANSPORT
+    meaning: XML could not be parsed
+    retry_safe: false
+    http_status: 400
+  - code: NACK_SCHEMA_VALIDATION_FAILED
+    layer: SCHEMA
+    meaning: XML failed XSD validation
+    retry_safe: false
+    http_status: 400
+  - code: NACK_MISSING_HEADER
+    layer: HEADER
+    meaning: A required header field is missing
+    retry_safe: false
+    http_status: 400
+  - code: NACK_UNKNOWN_MESSAGE_TYPE
+    layer: HEADER
+    meaning: Message type is not recognized
+    retry_safe: false
+    http_status: 400
+  - code: NACK_DUPLICATE_MESSAGE
+    layer: IDEMPOTENCY
+    meaning: A message with the same idempotency key was already accepted
+    retry_safe: true
+    http_status: 409
+  - code: NACK_UNAUTHORIZED_SENDER
+    layer: SECURITY
+    meaning: Sender is not authorized
+    retry_safe: false
+    http_status: 403
+  - code: NACK_RECEIVER_NOT_FOUND
+    layer: ROUTING
+    meaning: Receiver operator is unknown or inactive
+    retry_safe: false
+    http_status: 400
+  - code: NACK_MESSAGE_TOO_LARGE
+    layer: TRANSPORT
+    meaning: XML payload exceeded maximum size
+    retry_safe: false
+    http_status: 413
+  - code: NACK_INTERNAL_ERROR
+    layer: TRANSPORT
+    meaning: Internal system error; caller may retry later
+    retry_safe: true
+    http_status: 500
+
+business_rejection_codes:
+  - code: REJECTED_INELIGIBLE
+    layer: BUSINESS
+    meaning: Number is not eligible for porting
+    retry_safe: false
+  - code: REJECTED_NUMBER_NOT_FOUND
+    layer: BUSINESS
+    meaning: Number not found in donor records
+    retry_safe: false
+  - code: REJECTED_INVALID_PORT_TIME
+    layer: BUSINESS
+    meaning: Requested port time is invalid
+    retry_safe: false
+  - code: REJECTED_ALREADY_PORTED
+    layer: BUSINESS
+    meaning: Number is already ported
+    retry_safe: false
+  - code: REJECTED_CANCELLATION_WINDOW_CLOSED
+    layer: BUSINESS
+    meaning: Cancellation window has closed
+    retry_safe: false
+  - code: REJECTED_OPERATOR_DOWN
+    layer: BUSINESS
+    meaning: Operator is marked down
+    retry_safe: true
+  - code: REJECTED_OTHER
+    layer: BUSINESS
+    meaning: Other business rejection
+    retry_safe: false
+
+open_questions:
+  - "What are the exact numeric/string rejection codes in the official spec?"
+  - "Which codes are retry-safe vs final?"
+  - "What HTTP status codes (if any) are returned for each NACK?"

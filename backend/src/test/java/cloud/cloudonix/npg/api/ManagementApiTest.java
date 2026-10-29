@@ -1,0 +1,777 @@
+package cloud.cloudonix.npg.api;
+
+import cloud.cloudonix.npg.config.AuthSeeder;
+import cloud.cloudonix.npg.config.DatabaseConfig;
+import cloud.cloudonix.npg.config.MongoConfig;
+import cloud.cloudonix.npg.support.TestDatabase;
+import cloud.cloudonix.npg.support.TestMongo;
+import io.vertx.core.DeploymentOptions;
+import io.vertx.core.Future;
+import io.vertx.core.Vertx;
+import io.vertx.core.json.JsonArray;
+import io.vertx.core.json.JsonObject;
+import io.vertx.ext.mongo.MongoClient;
+import io.vertx.ext.web.client.WebClient;
+import io.vertx.ext.web.client.WebClientOptions;
+import io.vertx.junit5.VertxExtension;
+import io.vertx.junit5.VertxTestContext;
+import io.vertx.sqlclient.Pool;
+import io.vertx.sqlclient.Tuple;
+import org.mindrot.jbcrypt.BCrypt;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+
+import java.io.IOException;
+import java.net.ServerSocket;
+import java.util.UUID;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+@ExtendWith(VertxExtension.class)
+class ManagementApiTest {
+
+    private static Vertx vertx;
+    private static Pool pool;
+    private static MongoClient mongoClient;
+    private static WebClient webClient;
+
+    @BeforeAll
+    static void setUpClass(Vertx v, VertxTestContext ctx) {
+        vertx = v;
+        TestDatabase.start();
+        TestMongo.start();
+        System.setProperty("DB_HOST", TestDatabase.host());
+        System.setProperty("DB_PORT", String.valueOf(TestDatabase.port()));
+        System.setProperty("DB_NAME", TestDatabase.database());
+        System.setProperty("DB_USER", TestDatabase.user());
+        System.setProperty("DB_PASSWORD", TestDatabase.password());
+        System.setProperty("MONGO_URI", TestMongo.uri());
+        System.setProperty("MONGO_DB", TestMongo.dbName());
+        TestDatabase.migrate();
+
+        Future<Pool> poolFuture = DatabaseConfig.configure(vertx);
+        Future<MongoClient> mongoFuture = MongoConfig.configure(vertx);
+        Future.all(poolFuture, mongoFuture)
+            .onComplete(ctx.succeeding(result -> {
+                pool = poolFuture.result();
+                mongoClient = mongoFuture.result();
+                // ponytail: ephemeral port, not fixed 8080 — local hosts may already hold 8080
+                // (e.g. Podman gvproxy); inside the dev container any port is free
+                int port = freePort();
+                webClient = WebClient.create(vertx,
+                    new WebClientOptions().setDefaultHost("localhost").setDefaultPort(port));
+                // deployed once per class: a second listen on the same port would fail
+                vertx.deployVerticle(ManagementApiVerticle.class,
+                        new DeploymentOptions().setConfig(new JsonObject().put("port", port)))
+                    .onComplete(ctx.succeedingThenComplete());
+            }));
+    }
+
+    @AfterAll
+    static void tearDownClass(VertxTestContext ctx) {
+        Future<Void> closePool = (pool != null) ? pool.close().mapEmpty() : Future.succeededFuture();
+        closePool.onComplete(v -> {
+            TestMongo.stop();
+            TestDatabase.stop();
+            ctx.completeNow();
+        });
+    }
+
+    @BeforeEach
+    void cleanTables(VertxTestContext ctx) {
+        // ponytail: DELETE not TRUNCATE — pool connections vary, per-session FK_CHECKS toggles are unreliable
+        pool.query("DELETE FROM np_timers").execute()
+            .compose(v -> pool.query("DELETE FROM np_workflow_events").execute())
+            .compose(v -> pool.query("DELETE FROM np_manual_tasks").execute())
+            .compose(v -> pool.query("DELETE FROM np_audit_events").execute())
+            .compose(v -> pool.query("DELETE FROM np_inbox").execute())
+            .compose(v -> pool.query("DELETE FROM np_outbox").execute())
+            .compose(v -> pool.query("DELETE FROM np_workflows").execute())
+            .compose(v -> pool.query("DELETE FROM np_messages").execute())
+            .compose(v -> pool.query("DELETE FROM np_numbers").execute())
+            .compose(v -> pool.query("DELETE FROM np_number_ownership_history").execute())
+            .compose(v -> pool.query("DELETE FROM np_operator_endpoints").execute())
+            .compose(v -> pool.query("DELETE FROM np_operators").execute())
+            .compose(v -> pool.query("DELETE FROM np_user_roles").execute())
+            .compose(v -> pool.query("DELETE FROM np_users").execute())
+            .compose(v -> pool.query("DELETE FROM np_roles").execute())
+            .compose(v -> mongoClient.removeDocuments("xml_messages", new JsonObject()))
+            .compose(v -> pool.preparedQuery(
+                "INSERT INTO np_operators (operator_code, operator_name) VALUES (?, ?)")
+                .execute(Tuple.of("OP01", "Operator One")))
+            .compose(v -> AuthSeeder.ensureSeeded(pool))
+            .onComplete(ctx.succeedingThenComplete());
+    }
+
+    @Test
+    void healthEndpointReturnsOk(VertxTestContext ctx) {
+        webClient.get("/health/live").send()
+            .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
+                assertEquals(200, resp.statusCode());
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void listOperatorsReturnsData(VertxTestContext ctx) {
+        webClient.get("/api/operators")
+            .putHeader("X-User-Role", "ADMIN")
+            .send()
+            .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
+                assertEquals(200, resp.statusCode());
+                JsonArray body = resp.bodyAsJsonArray();
+                assertEquals(1, body.size());
+                assertEquals("OP01", body.getJsonObject(0).getString("operatorCode"));
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void dashboardReturnsCounts(VertxTestContext ctx) {
+        webClient.get("/api/dashboard")
+            .putHeader("X-User-Role", "ADMIN")
+            .send()
+            .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
+                assertEquals(200, resp.statusCode());
+                JsonObject body = resp.bodyAsJsonObject();
+                for (String key : new String[]{"activeWorkflows", "inboxPending", "outboxPending",
+                        "openManualTasks", "failedWorkflows", "operatorsDown", "timersDue"}) {
+                    assertTrue(body.containsKey(key), "missing key: " + key);
+                }
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void manualTransitionRequiresRole(VertxTestContext ctx) {
+        seedWorkflow("REQ-MT-NOROLE")
+            .compose(uuid -> webClient.post("/api/workflows/" + uuid + "/manual-transition")
+                .sendJsonObject(new JsonObject().put("toState", "CHECK_SENT").put("reason", "test")))
+            .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
+                // no credentials at all → 401 (was 403 under the header-only placeholder)
+                assertEquals(401, resp.statusCode());
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void manualTransitionSucceedsWithRole(VertxTestContext ctx) {
+        seedWorkflow("REQ-MT-ADMIN")
+            .compose(uuid -> webClient.post("/api/workflows/" + uuid + "/manual-transition")
+                .putHeader("X-User-Role", "ADMIN")
+                .putHeader("X-User-Id", "tester")
+                .sendJsonObject(new JsonObject().put("toState", "CHECK_SENT").put("reason", "test"))
+                .compose(resp -> {
+                    ctx.verify(() -> assertEquals(200, resp.statusCode()));
+                    return pool.preparedQuery("""
+                            SELECT w.current_state,
+                                   (SELECT COUNT(*) FROM np_workflow_events e
+                                     WHERE e.workflow_id = w.id AND e.event_type = 'MANUAL_TRANSITION') AS manual_events
+                            FROM np_workflows w WHERE w.workflow_uuid = ?
+                            """).execute(Tuple.of(uuid));
+                }))
+            .onComplete(ctx.succeeding(rows -> ctx.verify(() -> {
+                var row = rows.iterator().next();
+                assertEquals("CHECK_SENT", row.getString("current_state"));
+                assertEquals(1L, row.getLong("manual_events"));
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void createOperatorRequiresRole(VertxTestContext ctx) {
+        webClient.post("/api/operators")
+            .sendJsonObject(new JsonObject()
+                .put("operatorCode", "OP77").put("operatorName", "Seventy Seven")
+                .put("licenseType", "MOBILE").put("reason", "seed"))
+            .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
+                // no credentials at all → 401 (was 403 under the header-only placeholder)
+                assertEquals(401, resp.statusCode());
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void createOperatorSucceeds(VertxTestContext ctx) {
+        webClient.post("/api/operators")
+            .putHeader("X-User-Role", "ADMIN")
+            .putHeader("X-User-Id", "tester")
+            .sendJsonObject(new JsonObject()
+                .put("operatorCode", "OP77").put("operatorName", "Seventy Seven")
+                .put("licenseType", "MOBILE").put("reason", "seed"))
+            .compose(resp -> {
+                ctx.verify(() -> {
+                    assertEquals(200, resp.statusCode());
+                    assertEquals("OP77", resp.bodyAsJsonObject().getString("operatorCode"));
+                });
+                return webClient.get("/api/operators/OP77")
+                    .putHeader("X-User-Role", "ADMIN")
+                    .send();
+            })
+            .compose(resp -> {
+                ctx.verify(() -> assertEquals("Seventy Seven", resp.bodyAsJsonObject().getString("operatorName")));
+                return pool.preparedQuery(
+                    "SELECT COUNT(*) AS c FROM np_audit_events WHERE action = 'OPERATOR_CREATED' AND entity_id = 'OP77'")
+                    .execute();
+            })
+            .onComplete(ctx.succeeding(rows -> ctx.verify(() -> {
+                assertEquals(1L, rows.iterator().next().getLong("c"));
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void createDuplicateReturnsConflict(VertxTestContext ctx) {
+        JsonObject body = new JsonObject()
+            .put("operatorCode", "OP77").put("operatorName", "Seventy Seven")
+            .put("licenseType", "MOBILE").put("reason", "seed");
+        webClient.post("/api/operators")
+            .putHeader("X-User-Role", "ADMIN")
+            .putHeader("X-User-Id", "tester")
+            .sendJsonObject(body)
+            .compose(resp -> {
+                ctx.verify(() -> assertEquals(200, resp.statusCode()));
+                return webClient.post("/api/operators")
+                    .putHeader("X-User-Role", "ADMIN")
+                    .putHeader("X-User-Id", "tester")
+                    .sendJsonObject(body);
+            })
+            .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
+                assertEquals(409, resp.statusCode());
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void updateOperatorChangesFields(VertxTestContext ctx) {
+        webClient.post("/api/operators")
+            .putHeader("X-User-Role", "ADMIN")
+            .putHeader("X-User-Id", "tester")
+            .sendJsonObject(new JsonObject()
+                .put("operatorCode", "OP77").put("operatorName", "Seventy Seven")
+                .put("licenseType", "MOBILE").put("reason", "seed"))
+            .compose(resp -> {
+                ctx.verify(() -> assertEquals(200, resp.statusCode(), resp.bodyAsString()));
+                return webClient.put("/api/operators/OP77")
+                    .putHeader("X-User-Role", "ADMIN")
+                    .putHeader("X-User-Id", "tester")
+                    .sendJsonObject(new JsonObject()
+                        .put("operatorName", "Renamed").put("isActive", false).put("reason", "rename"));
+            })
+            .compose(resp -> {
+                ctx.verify(() -> assertEquals(200, resp.statusCode(), resp.bodyAsString()));
+                return webClient.get("/api/operators/OP77")
+                    .putHeader("X-User-Role", "ADMIN")
+                    .send();
+            })
+            .compose(resp -> {
+                ctx.verify(() -> {
+                    JsonObject body = resp.bodyAsJsonObject();
+                    assertEquals("Renamed", body.getString("operatorName"));
+                    assertEquals(false, body.getBoolean("isActive"));
+                });
+                return pool.preparedQuery(
+                    "SELECT COUNT(*) AS c FROM np_audit_events WHERE action = 'OPERATOR_UPDATED' AND entity_id = 'OP77'")
+                    .execute();
+            })
+            .onComplete(ctx.succeeding(rows -> ctx.verify(() -> {
+                assertEquals(1L, rows.iterator().next().getLong("c"));
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void updateMissingReturns404(VertxTestContext ctx) {
+        webClient.put("/api/operators/NOPE")
+            .putHeader("X-User-Role", "ADMIN")
+            .putHeader("X-User-Id", "tester")
+            .sendJsonObject(new JsonObject().put("operatorName", "X").put("reason", "rename"))
+            .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
+                assertEquals(404, resp.statusCode());
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void getMessagePairLinksResponseToRequest(VertxTestContext ctx) {
+        seedMessage("Check", "INBOUND", "REQ-PAIR", "TX-PAIR-1", null)
+            .compose(v -> seedMessage("Check_response", "INBOUND", "REQ-PAIR", "TX-PAIR-2", "TX-PAIR-1"))
+            .compose(responseUuid -> webClient.get("/api/messages/" + responseUuid + "/pair")
+                .putHeader("X-User-Role", "ADMIN")
+                .send())
+            .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
+                assertEquals(200, resp.statusCode());
+                JsonObject body = resp.bodyAsJsonObject();
+                assertEquals("Check", body.getJsonObject("request").getString("messageType"));
+                assertEquals("TX-PAIR-1", body.getJsonObject("request").getString("transactionId"));
+                assertEquals("Check_response", body.getJsonObject("response").getString("messageType"));
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void searchMessagesFiltersByDirectionAndType(VertxTestContext ctx) {
+        seedMessage("Check", "INBOUND", "REQ-F1", "TX-F1", null)
+            .compose(v -> seedMessage("Publish", "OUTBOUND", "REQ-F2", "TX-F2", null))
+            .compose(v -> webClient.get("/api/messages?direction=INBOUND")
+                .putHeader("X-User-Role", "ADMIN")
+                .send())
+            .compose(resp -> {
+                ctx.verify(() -> {
+                    JsonArray body = resp.bodyAsJsonArray();
+                    assertEquals(1, body.size());
+                    assertEquals("Check", body.getJsonObject(0).getString("messageType"));
+                });
+                return webClient.get("/api/messages?messageType=Publish")
+                    .putHeader("X-User-Role", "ADMIN")
+                    .send();
+            })
+            .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
+                JsonArray body = resp.bodyAsJsonArray();
+                assertEquals(1, body.size());
+                assertEquals("OUTBOUND", body.getJsonObject(0).getString("direction"));
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void prefixSearchFindsNumbers(VertxTestContext ctx) {
+        Future<Void> seed = pool.preparedQuery("""
+                INSERT INTO np_numbers (phone_number, number_type, status) VALUES (?, 'FIXED', 'PORTED')
+                """)
+            .execute(Tuple.of("08XXXXXXX"))
+            .compose(v -> pool.preparedQuery("""
+                INSERT INTO np_numbers (phone_number, number_type, status) VALUES (?, 'FIXED', 'PORTED')
+                """)
+            .execute(Tuple.of("086123456")))
+            .mapEmpty();
+
+        seed
+            .compose(v -> webClient.get("/api/numbers?prefix=08")
+                .putHeader("X-User-Role", "ADMIN")
+                .send())
+            .compose(resp -> {
+                ctx.verify(() -> {
+                    JsonArray body = resp.bodyAsJsonArray();
+                    assertEquals(2, body.size());
+                });
+                return webClient.get("/api/numbers?prefix=0861")
+                    .putHeader("X-User-Role", "ADMIN")
+                    .send();
+            })
+            .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
+                JsonArray body = resp.bodyAsJsonArray();
+                assertEquals(1, body.size());
+                assertEquals("086123456", body.getJsonObject(0).getString("phoneNumber"));
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void endpointsCrud(VertxTestContext ctx) {
+        JsonObject endpoint = new JsonObject()
+            .put("endpointType", "NPG_INBOUND")
+            .put("endpointUrl", "https://op01.example.com/np/inbound");
+        webClient.post("/api/operators/OP01/endpoints")
+            .putHeader("X-User-Role", "ADMIN")
+            .putHeader("X-User-Id", "tester")
+            .sendJsonObject(endpoint)
+            .compose(resp -> {
+                ctx.verify(() -> {
+                    assertEquals(200, resp.statusCode(), resp.bodyAsString());
+                    JsonObject body = resp.bodyAsJsonObject();
+                    assertEquals("NPG_INBOUND", body.getString("endpointType"));
+                    assertEquals("https://op01.example.com/np/inbound", body.getString("endpointUrl"));
+                    assertEquals("4.0", body.getString("protocolVersion"));
+                    assertEquals("MTLS", body.getString("authMode"));
+                });
+                return webClient.get("/api/operators/OP01/endpoints")
+                    .putHeader("X-User-Role", "ADMIN")
+                    .send();
+            })
+            .compose(resp -> {
+                ctx.verify(() -> {
+                    JsonArray body = resp.bodyAsJsonArray();
+                    assertEquals(1, body.size());
+                    assertEquals("https://op01.example.com/np/inbound",
+                        body.getJsonObject(0).getString("endpointUrl"));
+                });
+                return webClient.get("/api/operators/OP01/endpoints")
+                    .putHeader("X-User-Role", "ADMIN")
+                    .send()
+                    .compose(r -> webClient.delete("/api/operators/OP01/endpoints/"
+                            + r.bodyAsJsonArray().getJsonObject(0).getLong("id"))
+                        .putHeader("X-User-Role", "ADMIN")
+                        .putHeader("X-User-Id", "tester")
+                        .send());
+            })
+            .compose(resp -> {
+                ctx.verify(() -> assertEquals(200, resp.statusCode(), resp.bodyAsString()));
+                return webClient.get("/api/operators/OP01/endpoints")
+                    .putHeader("X-User-Role", "ADMIN")
+                    .send();
+            })
+            .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
+                assertEquals(0, resp.bodyAsJsonArray().size());
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void createEndpointRequiresOperator(VertxTestContext ctx) {
+        webClient.post("/api/operators/NOPE/endpoints")
+            .putHeader("X-User-Role", "ADMIN")
+            .putHeader("X-User-Id", "tester")
+            .sendJsonObject(new JsonObject()
+                .put("endpointType", "NPG_INBOUND")
+                .put("endpointUrl", "https://x.example.com/np/inbound"))
+            .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
+                assertEquals(404, resp.statusCode());
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void createEndpointValidatesUrl(VertxTestContext ctx) {
+        webClient.post("/api/operators/OP01/endpoints")
+            .putHeader("X-User-Role", "ADMIN")
+            .putHeader("X-User-Id", "tester")
+            .sendJsonObject(new JsonObject()
+                .put("endpointType", "NPG_INBOUND")
+                .put("endpointUrl", "ftp://x.example.com"))
+            .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
+                assertEquals(400, resp.statusCode());
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void localFlagIsExclusive(VertxTestContext ctx) {
+        webClient.post("/api/operators")
+            .putHeader("X-User-Role", "ADMIN")
+            .putHeader("X-User-Id", "tester")
+            .sendJsonObject(new JsonObject()
+                .put("operatorCode", "LOCAL-A").put("operatorName", "Local A").put("isLocal", true))
+            .compose(resp -> {
+                ctx.verify(() -> assertEquals(200, resp.statusCode(), resp.bodyAsString()));
+                return webClient.post("/api/operators")
+                    .putHeader("X-User-Role", "ADMIN")
+                    .putHeader("X-User-Id", "tester")
+                    .sendJsonObject(new JsonObject()
+                        .put("operatorCode", "LOCAL-B").put("operatorName", "Local B").put("isLocal", true));
+            })
+            .compose(resp -> {
+                ctx.verify(() -> assertEquals(200, resp.statusCode(), resp.bodyAsString()));
+                return webClient.get("/api/operators/LOCAL-A")
+                    .putHeader("X-User-Role", "ADMIN")
+                    .send();
+            })
+            .compose(resp -> {
+                ctx.verify(() -> assertEquals(false, resp.bodyAsJsonObject().getBoolean("isLocal")));
+                return webClient.get("/api/operators/LOCAL-B")
+                    .putHeader("X-User-Role", "ADMIN")
+                    .send();
+            })
+            .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
+                assertEquals(true, resp.bodyAsJsonObject().getBoolean("isLocal"));
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void loginIssuesToken(VertxTestContext ctx) {
+        webClient.post("/api/auth/login")
+            .sendJsonObject(new JsonObject().put("username", "admin").put("password", "admin123"))
+            .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
+                assertEquals(200, resp.statusCode(), resp.bodyAsString());
+                JsonObject body = resp.bodyAsJsonObject();
+                assertNotNull(body.getString("token"));
+                JsonObject user = body.getJsonObject("user");
+                assertEquals("admin", user.getString("username"));
+                assertTrue(user.getJsonArray("roles").contains("ADMIN"));
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void loginRejectsBadPassword(VertxTestContext ctx) {
+        webClient.post("/api/auth/login")
+            .sendJsonObject(new JsonObject().put("username", "admin").put("password", "wrong"))
+            .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
+                assertEquals(401, resp.statusCode());
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void meReturnsUser(VertxTestContext ctx) {
+        login("admin", "admin123")
+            .compose(token -> webClient.get("/api/auth/me")
+                .putHeader("Authorization", "Bearer " + token)
+                .send())
+            .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
+                assertEquals(200, resp.statusCode(), resp.bodyAsString());
+                assertEquals("admin", resp.bodyAsJsonObject().getString("username"));
+                assertTrue(resp.bodyAsJsonObject().getJsonArray("roles").contains("ADMIN"));
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void unauthenticatedRequestRejected(VertxTestContext ctx) {
+        webClient.get("/api/operators").send()
+            .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
+                assertEquals(401, resp.statusCode());
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void userRoleCanReadButNotWrite(VertxTestContext ctx) {
+        seedUser("reader", "user123", "USER")
+            .compose(v -> login("reader", "user123"))
+            .compose(token -> webClient.get("/api/operators")
+                .putHeader("Authorization", "Bearer " + token)
+                .send()
+                .compose(resp -> {
+                    ctx.verify(() -> assertEquals(200, resp.statusCode(), resp.bodyAsString()));
+                    return webClient.post("/api/operators")
+                        .putHeader("Authorization", "Bearer " + token)
+                        .sendJsonObject(new JsonObject()
+                            .put("operatorCode", "OP88").put("operatorName", "Eighty Eight"));
+                }))
+            .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
+                assertEquals(403, resp.statusCode());
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void managerCannotModifyLocalConfig(VertxTestContext ctx) {
+        pool.query("UPDATE np_operators SET is_local = TRUE WHERE operator_code = 'OP01'").execute()
+            .compose(v -> pool.query(
+                "INSERT INTO np_operators (operator_code, operator_name) VALUES ('OP77', 'Peer')").execute())
+            .compose(v -> seedUser("mgr", "manager123", "MANAGER"))
+            .compose(v -> login("mgr", "manager123"))
+            .compose(token -> webClient.put("/api/operators/OP01")
+                .putHeader("Authorization", "Bearer " + token)
+                .sendJsonObject(new JsonObject().put("operatorName", "Hacked").put("reason", "try"))
+                .compose(resp -> {
+                    ctx.verify(() -> assertEquals(403, resp.statusCode(), resp.bodyAsString()));
+                    return webClient.put("/api/operators/OP77")
+                        .putHeader("Authorization", "Bearer " + token)
+                        .sendJsonObject(new JsonObject().put("operatorName", "Renamed").put("reason", "ok"));
+                }))
+            .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
+                assertEquals(200, resp.statusCode(), resp.bodyAsString());
+                assertEquals("Renamed", resp.bodyAsJsonObject().getString("operatorName"));
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void adminCanModifyLocalConfig(VertxTestContext ctx) {
+        pool.query("UPDATE np_operators SET is_local = TRUE WHERE operator_code = 'OP01'").execute()
+            .compose(v -> login("admin", "admin123"))
+            .compose(token -> webClient.put("/api/operators/OP01")
+                .putHeader("Authorization", "Bearer " + token)
+                .sendJsonObject(new JsonObject().put("operatorName", "Local Renamed").put("reason", "admin")))
+            .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
+                assertEquals(200, resp.statusCode(), resp.bodyAsString());
+                assertEquals("Local Renamed", resp.bodyAsJsonObject().getString("operatorName"));
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void usersCrudFlow(VertxTestContext ctx) {
+        JsonObject create = new JsonObject()
+            .put("username", "noc1").put("password", "password123")
+            .put("roles", new JsonArray().add("USER")).put("displayName", "Noc One");
+        webClient.post("/api/users")
+            .putHeader("X-User-Role", "ADMIN").putHeader("X-User-Id", "tester")
+            .sendJsonObject(create)
+            .compose(resp -> {
+                ctx.verify(() -> {
+                    assertEquals(200, resp.statusCode(), resp.bodyAsString());
+                    JsonObject body = resp.bodyAsJsonObject();
+                    assertEquals("noc1", body.getString("username"));
+                    assertEquals("Noc One", body.getString("displayName"));
+                    assertEquals(new JsonArray().add("USER"), body.getJsonArray("roles"));
+                });
+                return webClient.get("/api/users")
+                    .putHeader("X-User-Role", "ADMIN").send();
+            })
+            .compose(resp -> {
+                ctx.verify(() -> {
+                    JsonObject noc1 = findUser(resp.bodyAsJsonArray(), "noc1");
+                    assertNotNull(noc1);
+                    assertEquals(new JsonArray().add("USER"), noc1.getJsonArray("roles"));
+                    assertTrue(noc1.getBoolean("isActive"));
+                });
+                return webClient.put("/api/users/noc1")
+                    .putHeader("X-User-Role", "ADMIN").putHeader("X-User-Id", "tester")
+                    .sendJsonObject(new JsonObject()
+                        .put("roles", new JsonArray().add("MANAGER")).put("isActive", false));
+            })
+            .compose(resp -> {
+                ctx.verify(() -> assertEquals(200, resp.statusCode(), resp.bodyAsString()));
+                return webClient.get("/api/users")
+                    .putHeader("X-User-Role", "ADMIN").send();
+            })
+            .compose(resp -> {
+                ctx.verify(() -> {
+                    JsonObject noc1 = findUser(resp.bodyAsJsonArray(), "noc1");
+                    assertEquals(new JsonArray().add("MANAGER"), noc1.getJsonArray("roles"));
+                    assertFalse(noc1.getBoolean("isActive"));
+                });
+                return pool.preparedQuery("""
+                        SELECT action, COUNT(*) AS c FROM np_audit_events
+                        WHERE entity_type = 'USER' AND entity_id = 'noc1'
+                          AND action IN ('USER_CREATED', 'USER_UPDATED')
+                        GROUP BY action
+                        """).execute();
+            })
+            .onComplete(ctx.succeeding(rows -> ctx.verify(() -> {
+                java.util.Map<String, Long> counts = new java.util.HashMap<>();
+                rows.forEach(row -> counts.put(row.getString("action"), row.getLong("c")));
+                assertEquals(1L, counts.get("USER_CREATED"));
+                assertEquals(1L, counts.get("USER_UPDATED"));
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void createUserValidation(VertxTestContext ctx) {
+        webClient.post("/api/users")
+            .putHeader("X-User-Role", "ADMIN").putHeader("X-User-Id", "tester")
+            .sendJsonObject(new JsonObject().put("username", "noc2").put("password", "password123"))
+            .compose(resp -> {
+                ctx.verify(() -> assertEquals(400, resp.statusCode(), resp.bodyAsString()));
+                return webClient.post("/api/users")
+                    .putHeader("X-User-Role", "ADMIN").putHeader("X-User-Id", "tester")
+                    .sendJsonObject(new JsonObject().put("username", "noc2").put("password", "short")
+                        .put("roles", new JsonArray().add("USER")));
+            })
+            .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
+                assertEquals(400, resp.statusCode(), resp.bodyAsString());
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void createDuplicateUser(VertxTestContext ctx) {
+        JsonObject body = new JsonObject()
+            .put("username", "noc3").put("password", "password123")
+            .put("roles", new JsonArray().add("USER"));
+        webClient.post("/api/users")
+            .putHeader("X-User-Role", "ADMIN").putHeader("X-User-Id", "tester")
+            .sendJsonObject(body)
+            .compose(resp -> {
+                ctx.verify(() -> assertEquals(200, resp.statusCode(), resp.bodyAsString()));
+                return webClient.post("/api/users")
+                    .putHeader("X-User-Role", "ADMIN").putHeader("X-User-Id", "tester")
+                    .sendJsonObject(body);
+            })
+            .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
+                assertEquals(409, resp.statusCode(), resp.bodyAsString());
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void userManagementRequiresAdmin(VertxTestContext ctx) {
+        seedUser("manager1", "manager123", "MANAGER")
+            .compose(v -> login("manager1", "manager123"))
+            .compose(token -> webClient.get("/api/users")
+                .putHeader("Authorization", "Bearer " + token).send())
+            .compose(resp -> {
+                ctx.verify(() -> assertEquals(403, resp.statusCode(), resp.bodyAsString()));
+                return seedUser("user1", "user12345", "USER")
+                    .compose(v -> login("user1", "user12345"));
+            })
+            .compose(token -> webClient.get("/api/users")
+                .putHeader("Authorization", "Bearer " + token).send())
+            .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
+                assertEquals(403, resp.statusCode(), resp.bodyAsString());
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void localSettingsReturnsPublicBaseUrl(VertxTestContext ctx) {
+        webClient.get("/api/settings/local")
+            .putHeader("X-User-Role", "ADMIN")
+            .send()
+            .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
+                assertEquals(200, resp.statusCode(), resp.bodyAsString());
+                assertTrue(resp.bodyAsJsonObject().containsKey("publicBaseUrl"));
+                ctx.completeNow();
+            })));
+    }
+
+    private static JsonObject findUser(JsonArray users, String username) {
+        for (int i = 0; i < users.size(); i++) {
+            JsonObject user = users.getJsonObject(i);
+            if (username.equals(user.getString("username"))) {
+                return user;
+            }
+        }
+        return null;
+    }
+
+    private Future<String> login(String username, String password) {
+        return webClient.post("/api/auth/login")
+            .sendJsonObject(new JsonObject().put("username", username).put("password", password))
+            .compose(resp -> resp.statusCode() == 200
+                ? Future.succeededFuture(resp.bodyAsJsonObject().getString("token"))
+                : Future.failedFuture("login failed: " + resp.statusCode() + " " + resp.bodyAsString()));
+    }
+
+    private Future<Void> seedUser(String username, String rawPassword, String role) {
+        return pool.preparedQuery(
+                "INSERT INTO np_users (username, display_name, password_hash) VALUES (?, ?, ?)")
+            .execute(Tuple.of(username, username, BCrypt.hashpw(rawPassword, BCrypt.gensalt())))
+            .compose(v -> pool.preparedQuery("""
+                    INSERT INTO np_user_roles (user_id, role_id)
+                    SELECT u.id, r.id FROM np_users u JOIN np_roles r ON r.role_name = ?
+                    WHERE u.username = ?
+                    """)
+                .execute(Tuple.of(role, username)))
+            .mapEmpty();
+    }
+
+    private Future<String> seedMessage(String messageType, String direction, String requestId,
+                                       String transactionId, String correlationId) {
+        String uuid = UUID.randomUUID().toString();
+        return pool.preparedQuery("""
+                INSERT INTO np_messages (message_uuid, message_type, direction, request_id, transaction_id,
+                                         correlation_id, idempotency_key, technical_status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'RECEIVED')
+                """)
+            .execute(Tuple.of(uuid, messageType, direction, requestId, transactionId, correlationId,
+                UUID.randomUUID().toString()))
+            .map(uuid);
+    }
+
+    private static int freePort() {
+        try (ServerSocket socket = new ServerSocket(0)) {
+            return socket.getLocalPort();
+        } catch (IOException e) {
+            throw new RuntimeException("No free port available", e);
+        }
+    }
+
+    private Future<String> seedWorkflow(String requestId) {
+        String uuid = UUID.randomUUID().toString();
+        return pool.preparedQuery("""
+                INSERT INTO np_workflows (workflow_uuid, workflow_type, request_id, phone_number, current_state)
+                VALUES (?, 'PORTING', ?, '972501234567', 'NEW')
+                """)
+            .execute(Tuple.of(uuid, requestId))
+            .map(uuid);
+    }
+}

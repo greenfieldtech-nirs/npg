@@ -1,0 +1,131 @@
+# NPG production compose.
+#
+# NOTE on nginx/TLS: `nginx/nginx.prod.conf` is mounted by default and serves
+# plain HTTP on port 80 with correct prod upstreams (api / inbound-gateway).
+# To enable TLS, uncomment the 443 server block in nginx.prod.conf and place
+# cert.pem/key.pem in ./tls/.
+services:
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ../nginx/nginx.prod.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./tls/cert.pem:/etc/nginx/cert.pem:ro
+      - ./tls/key.pem:/etc/nginx/key.pem:ro
+    depends_on:
+      - api
+      - inbound-gateway
+      - frontend
+
+  frontend:
+    build:
+      context: ../frontend
+
+  api:
+    build:
+      context: ../backend
+    environment:
+      APP_ROLE: api
+      API_PORT: "8080"
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      MONGO_URI: ${MONGO_URI}
+      MONGO_DB: ${MONGO_DB}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    deploy:
+      replicas: 2
+
+  inbound-gateway:
+    build:
+      context: ../backend
+    environment:
+      APP_ROLE: inbound
+      PORT: "8080"
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      MONGO_URI: ${MONGO_URI}
+      MONGO_DB: ${MONGO_DB}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    deploy:
+      replicas: 2
+
+  worker:
+    build:
+      context: ../backend
+    environment:
+      APP_ROLE: worker
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      MONGO_URI: ${MONGO_URI}
+      MONGO_DB: ${MONGO_DB}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    deploy:
+      replicas: 3
+
+  timer-worker:
+    build:
+      context: ../backend
+    environment:
+      APP_ROLE: timer
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      MONGO_URI: ${MONGO_URI}
+      MONGO_DB: ${MONGO_DB}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    deploy:
+      replicas: 2
+
+  dispatcher:
+    build:
+      context: ../backend
+    environment:
+      APP_ROLE: dispatcher
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      MONGO_URI: ${MONGO_URI}
+      MONGO_DB: ${MONGO_DB}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    deploy:
+      replicas: 3
+
+  mariadb:
+    image: mariadb:10.11
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME}
+      MYSQL_USER: ${DB_USER}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - mariadb_data:/var/lib/mysql
+
+  mongodb:
+    image: mongo:7.0
+    volumes:
+      - mongodb_data:/data/db
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly no --save ""
+    deploy:
+      replicas: 1
+
+volumes:
+  mariadb_data:
+  mongodb_data:

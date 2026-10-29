@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<npMessageBody xmlns="">
+    <Request_response>
+        <positiveApproval>
+            <approvalInd>Y</approvalInd>
+        </positiveApproval>
+        <requestTrxNo>HL000163454222</requestTrxNo>
+        <requestRetryDate>2026-09-24T16:11:01+03:00</requestRetryDate>
+    </Request_response>
+</npMessageBody>

@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<npMessageBody xmlns="">
+  <Check>
+    <fixed>
+      <networkType>F</networkType>
+      <fixedNumberSingle>
+        <numberType>S</numberType>
+        <number>08XXXXXXX</number>
+      </fixedNumberSingle>
+      <identificationValue>0</identificationValue>
+      <identificationValue2nd/>
+      <identificationValue3rd/>
+    </fixed>
+  </Check>
+</npMessageBody>

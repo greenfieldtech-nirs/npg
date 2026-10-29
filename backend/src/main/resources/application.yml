@@ -1,0 +1,27 @@
+app:
+  role: ${APP_ROLE:all}
+  publicBaseUrl: ${APP_PUBLIC_BASE_URL:http://localhost:8080}
+  workerId: ${WORKER_ID:worker-1}
+  queueClaimBatchSize: ${QUEUE_CLAIM_BATCH_SIZE:10}
+  queueLockSeconds: ${QUEUE_LOCK_SECONDS:60}
+
+db:
+  host: ${DB_HOST:localhost}
+  port: ${DB_PORT:3306}
+  name: ${DB_NAME:npg}
+  user: ${DB_USER:npg}
+  password: ${DB_PASSWORD:npg}
+  pool:
+    maxSize: ${DB_POOL_MAX_SIZE:10}
+
+mongo:
+  uri: ${MONGO_URI:mongodb://localhost:27017}
+  db: ${MONGO_DB:npg}
+
+logging:
+  level:
+    root: ${LOG_LEVEL:INFO}
+
+redis:
+  uri: ${REDIS_URI:redis://localhost:6379}
+  enabled: ${REDIS_ENABLED:true}

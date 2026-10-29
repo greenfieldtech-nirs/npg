@@ -1,0 +1,229 @@
+openapi: 3.0.0
+info:
+  title: NPG Management API
+  version: 0.1.0
+paths:
+  /api/dashboard:
+    get:
+      summary: Dashboard summary
+      operationId: getDashboard
+      responses:
+        '200':
+          description: Dashboard counts
+          content:
+            application/json:
+              schema:
+                type: object
+  /api/workflows:
+    get:
+      summary: Search workflows
+      operationId: searchWorkflows
+      parameters:
+        - name: phoneNumber
+          in: query
+          schema:
+            type: string
+        - name: state
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Paginated workflows
+  /api/workflows/{workflowUuid}:
+    get:
+      summary: Get workflow details
+      operationId: getWorkflow
+      parameters:
+        - name: workflowUuid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Workflow details
+        '404':
+          description: Not found
+  /api/workflows/{workflowUuid}/events:
+    get:
+      summary: Get workflow events
+      operationId: getWorkflowEvents
+      parameters:
+        - name: workflowUuid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Workflow events
+  /api/workflows/{workflowUuid}/manual-transition:
+    post:
+      summary: Manually transition a workflow
+      operationId: manualTransition
+      parameters:
+        - name: workflowUuid
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                toState:
+                  type: string
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Transition applied
+  /api/messages:
+    get:
+      summary: Search messages
+      operationId: searchMessages
+      parameters:
+        - name: requestId
+          in: query
+          schema:
+            type: string
+        - name: messageType
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Paginated messages
+  /api/messages/{messageUuid}:
+    get:
+      summary: Get message details
+      operationId: getMessage
+      parameters:
+        - name: messageUuid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Message details
+  /api/messages/{messageUuid}/xml:
+    get:
+      summary: Get raw XML
+      operationId: getMessageXml
+      parameters:
+        - name: messageUuid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Raw XML
+  /api/operators:
+    get:
+      summary: List operators
+      operationId: listOperators
+      responses:
+        '200':
+          description: Operators
+  /api/operators/{operatorCode}:
+    get:
+      summary: Get operator
+      operationId: getOperator
+      parameters:
+        - name: operatorCode
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operator details
+  /api/operators/{operatorCode}/mark-down:
+    post:
+      summary: Mark operator down
+      operationId: markOperatorDown
+      parameters:
+        - name: operatorCode
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operator marked down
+  /api/manual-tasks:
+    get:
+      summary: List manual tasks
+      operationId: listManualTasks
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Tasks
+  /api/manual-tasks/{taskUuid}/resolve:
+    post:
+      summary: Resolve a manual task
+      operationId: resolveManualTask
+      parameters:
+        - name: taskUuid
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                resolution:
+                  type: string
+      responses:
+        '200':
+          description: Task resolved
+  /api/numbers/{phoneNumber}:
+    get:
+      summary: Get number details
+      operationId: getNumber
+      parameters:
+        - name: phoneNumber
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Number details
+  /api/numbers/{phoneNumber}/history:
+    get:
+      summary: Get number ownership history
+      operationId: getNumberHistory
+      parameters:
+        - name: phoneNumber
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Ownership history

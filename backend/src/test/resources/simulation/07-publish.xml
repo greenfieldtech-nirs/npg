@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<npMessageBody xmlns="">
+  <Publish>
+    <donor>BZ</donor>
+    <connectDateTime>2026-09-24T16:50:08+03:00</connectDateTime>
+    <publishType>Port</publishType>
+    <disconnectDateTime>2026-09-24T16:50:08+03:00</disconnectDateTime>
+    <fixed>
+      <fixedNumberSingle>
+        <numberType>S</numberType>
+        <number>08XXXXXXX</number>
+      </fixedNumberSingle>
+    </fixed>
+  </Publish>
+</npMessageBody>

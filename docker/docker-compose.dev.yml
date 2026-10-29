@@ -1,0 +1,119 @@
+services:
+  db:
+    image: mariadb:10.11
+    container_name: npg-db
+    command: mysqld --default-time-zone=+00:00
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: npg
+      MYSQL_USER: npg
+      MYSQL_PASSWORD: npg
+    ports:
+      - "3307:3306"
+    volumes:
+      - npg-db-data:/var/lib/mysql
+    networks:
+      - npg_dev
+    healthcheck:
+      test: ["CMD", "mariadb-admin", "ping", "-h", "localhost", "-u", "npg", "-pnpg"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  mongo:
+    image: mongo:7
+    container_name: npg-mongo
+    ports:
+      - "27018:27017"
+    volumes:
+      - npg-mongo-data:/data/db
+    networks:
+      - npg_dev
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    container_name: npg-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - npg_dev
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: npg-backend
+    ports:
+      - "18080:8080"
+      - "18081:8081"
+    environment:
+      APP_ROLE: all
+      API_PORT: "8080"
+      PORT: "8081"
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_NAME: npg
+      DB_USER: npg
+      DB_PASSWORD: npg
+      DB_POOL_MAX_SIZE: 10
+      MONGO_URI: mongodb://mongo:27017
+      MONGO_DB: npg
+      REDIS_URI: redis://redis:6379
+      LOG_LEVEL: INFO
+      CATALOG_PATH: /docs/protocol
+    volumes:
+      - ../docs/protocol:/docs/protocol:ro
+    networks:
+      - npg_dev
+    depends_on:
+      db:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: npg-frontend
+    networks:
+      - npg_dev
+    depends_on:
+      - backend
+
+  nginx:
+    image: nginx:alpine
+    container_name: npg-nginx
+    ports:
+      - "8090:80"
+    volumes:
+      - ../nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - npg_dev
+    depends_on:
+      - backend
+      - frontend
+
+volumes:
+  npg-db-data:
+  npg-mongo-data:
+
+networks:
+  npg_dev:
+    name: npg_dev
+    driver: bridge
