@@ -943,6 +943,118 @@ class ManagementApiTest {
             })));
     }
 
+    @Test
+    void unknownDeliveryCanBeConfirmedManuallyAndIsAudited(VertxTestContext ctx) {
+        String outboxUuid = UUID.randomUUID().toString();
+        seedMessage("Request", "OUTBOUND", "REQ-UD", "TX-UD", null)
+            .compose(messageUuid -> pool.preparedQuery("""
+                    INSERT INTO np_outbox (outbox_uuid, message_id, destination_operator_id, item_type, status, due_at)
+                    SELECT ?, id, 1, 'Request', 'UNKNOWN_DELIVERY', UTC_TIMESTAMP(6) FROM np_messages WHERE message_uuid = ?
+                    """).execute(Tuple.of(outboxUuid, messageUuid)))
+            .compose(v -> webClient.post("/api/outbox/" + outboxUuid + "/mark-delivered").putHeader("Authorization", adminAuth())
+                .sendJsonObject(new JsonObject()))
+            .compose(resp -> {
+                ctx.verify(() -> assertEquals(400, resp.statusCode(), "a reason is required"));
+                return webClient.post("/api/outbox/" + outboxUuid + "/mark-delivered").putHeader("Authorization", adminAuth())
+                    .sendJsonObject(new JsonObject().put("reason", "peer confirmed receipt by phone"));
+            })
+            .compose(resp -> {
+                ctx.verify(() -> assertEquals(200, resp.statusCode(), resp.bodyAsString()));
+                return webClient.post("/api/outbox/" + outboxUuid + "/mark-delivered").putHeader("Authorization", adminAuth())
+                    .sendJsonObject(new JsonObject().put("reason", "again"));
+            })
+            .compose(resp -> {
+                ctx.verify(() -> assertEquals(409, resp.statusCode(), "already delivered"));
+                return pool.query("""
+                    SELECT o.status, m.technical_status,
+                      (SELECT COUNT(*) FROM np_audit_events a WHERE a.action = 'OUTBOX_MARKED_DELIVERED' AND a.actor_id = 'tester') AS audits
+                    FROM np_outbox o JOIN np_messages m ON m.id = o.message_id""").execute();
+            })
+            .onComplete(ctx.succeeding(rows -> ctx.verify(() -> {
+                var row = rows.iterator().next();
+                assertEquals("SUCCEEDED", row.getString("status"));
+                assertEquals("DELIVERED", row.getString("technical_status"));
+                assertEquals(1L, row.getLong("audits"));
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void manualTaskLifecycleIsAudited(VertxTestContext ctx) {
+        String taskUuid = UUID.randomUUID().toString();
+        pool.preparedQuery("INSERT INTO np_manual_tasks (task_uuid, task_type, description) VALUES (?, 'TEST', 'check this')")
+            .execute(Tuple.of(taskUuid))
+            .compose(v -> webClient.post("/api/manual-tasks/" + taskUuid + "/assign").putHeader("Authorization", adminAuth())
+                .sendJsonObject(new JsonObject().put("assignee", "noc-alice")))
+            .compose(resp -> webClient.post("/api/manual-tasks/" + taskUuid + "/notes").putHeader("Authorization", adminAuth())
+                .sendJsonObject(new JsonObject().put("note", "called the peer")))
+            .compose(resp -> webClient.post("/api/manual-tasks/" + taskUuid + "/resolve").putHeader("Authorization", adminAuth())
+                .sendJsonObject(new JsonObject().put("resolution", "peer re-sent")))
+            .compose(resp -> {
+                ctx.verify(() -> assertEquals(200, resp.statusCode(), resp.bodyAsString()));
+                return webClient.get("/api/manual-tasks/" + taskUuid).putHeader("Authorization", adminAuth()).send();
+            })
+            .compose(resp -> {
+                ctx.verify(() -> {
+                    JsonObject task = resp.bodyAsJsonObject();
+                    assertEquals("CLOSED", task.getString("status"));
+                    assertEquals("noc-alice", task.getString("assignedTo"));
+                    assertEquals(1, task.getJsonArray("notes").size());
+                });
+                return webClient.post("/api/manual-tasks/" + UUID.randomUUID() + "/resolve").putHeader("Authorization", adminAuth())
+                    .sendJsonObject(new JsonObject().put("resolution", "x"));
+            })
+            .compose(resp -> {
+                ctx.verify(() -> assertEquals(404, resp.statusCode()));
+                return pool.query("SELECT COUNT(*) AS c FROM np_audit_events WHERE entity_type = 'MANUAL_TASK'").execute();
+            })
+            .onComplete(ctx.succeeding(rows -> ctx.verify(() -> {
+                assertEquals(3L, rows.iterator().next().getLong("c"), "assign, note and resolve");
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void operatorAvailabilityChangesAreAudited(VertxTestContext ctx) {
+        webClient.post("/api/operators/OP01/mark-down").putHeader("Authorization", adminAuth())
+                .sendJsonObject(new JsonObject().put("reason", "peer called: maintenance"))
+            .compose(resp -> {
+                ctx.verify(() -> assertEquals(200, resp.statusCode(), resp.bodyAsString()));
+                return webClient.post("/api/operators/OP01/mark-up").putHeader("Authorization", adminAuth())
+                    .sendJsonObject(new JsonObject().put("reason", "back"));
+            })
+            .compose(resp -> {
+                ctx.verify(() -> assertEquals(200, resp.statusCode(), resp.bodyAsString()));
+                return webClient.post("/api/operators/NOPE/mark-down").putHeader("Authorization", adminAuth())
+                    .sendJsonObject(new JsonObject().put("reason", "x"));
+            })
+            .compose(resp -> {
+                ctx.verify(() -> assertEquals(404, resp.statusCode()));
+                return pool.query("SELECT availability_status, (SELECT COUNT(*) FROM np_audit_events WHERE entity_id = 'OP01' "
+                    + "AND action IN ('OPERATOR_MARKED_DOWN', 'OPERATOR_MARKED_UP')) AS audits FROM np_operators WHERE operator_code = 'OP01'").execute();
+            })
+            .onComplete(ctx.succeeding(rows -> ctx.verify(() -> {
+                assertEquals("UP", rows.iterator().next().getString("availability_status"));
+                assertEquals(2L, rows.iterator().next().getLong("audits"));
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void readOnlyUsersCannotOperateQueues(VertxTestContext ctx) {
+        seedUser("reader2", "reader-password", "USER")
+            .compose(v -> webClient.post("/api/outbox/" + UUID.randomUUID() + "/retry").putHeader("Authorization", bearer("reader2", "USER"))
+                .sendJsonObject(new JsonObject().put("reason", "x")))
+            .compose(resp -> {
+                ctx.verify(() -> assertEquals(403, resp.statusCode()));
+                return webClient.get("/api/outbox?status=MANUAL_REVIEW").putHeader("Authorization", bearer("reader2", "USER")).send();
+            })
+            .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
+                assertEquals(200, resp.statusCode(), "reading is allowed");
+                ctx.completeNow();
+            })));
+    }
+
     /** Real signed token for the seeded ADMIN user — the API re-checks the user in the DB. */
     private static String adminAuth() {
         return bearer(TEST_ADMIN, "ADMIN");

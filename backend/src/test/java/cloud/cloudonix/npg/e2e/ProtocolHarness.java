@@ -91,7 +91,9 @@ public class ProtocolHarness {
         headers.put("x-np-trx-no", from + String.format("%012d", Math.abs(UUID.randomUUID().getMostSignificantBits()) % 1_000_000_000_000L));
         String xml = "<npMessageBody><" + type + ">" + bodyXml + "</" + type + "></npMessageBody>";
         return gateway.receive(xml, new XmlTransportMetadata("HTTPS", "10.0.0.1", null, new JsonObject()), headers)
-            .compose(ack -> processInbox().map(ack));
+            .compose(ack -> ack.status() == cloud.cloudonix.npg.acknack.TechnicalAckStatus.ACK
+                ? processInbox().map(ack)
+                : Future.failedFuture("Gateway NACKed " + type + ": " + ack.nackReason()));
     }
 
     /** Positive response from {@code from} to the request we sent it. */
@@ -105,8 +107,19 @@ public class ProtocolHarness {
             + "<negativeApproval><approvalInd>N</approvalInd><rejectReasonCode>" + code + "</rejectReasonCode></negativeApproval>");
     }
 
+    /** Processes everything claimable, then fails if an accepted message is still waiting. */
     public Future<Void> processInbox() {
-        return new InboxRepository(pool).claimBatch("harness", 50, 60).compose(inboxProcessor::processAll);
+        return new InboxRepository(pool).claimBatch("harness", 50, 60).compose(inboxProcessor::processAll)
+            .compose(v -> pool.query("SELECT id, item_type, status, due_at, UTC_TIMESTAMP(6) AS db_now FROM np_inbox "
+                + "WHERE status IN ('PENDING', 'CLAIMED', 'PROCESSING')").execute())
+            .compose(rows -> {
+                if (!rows.iterator().hasNext()) {
+                    return Future.succeededFuture();
+                }
+                Row r = rows.iterator().next();
+                return Future.failedFuture("Inbox item left unprocessed: " + r.getString("item_type") + " " + r.getString("status")
+                    + " due " + r.getLocalDateTime("due_at") + " (db now " + r.getLocalDateTime("db_now") + ")");
+            });
     }
 
     /** Makes the named pending timers due and fires them. */

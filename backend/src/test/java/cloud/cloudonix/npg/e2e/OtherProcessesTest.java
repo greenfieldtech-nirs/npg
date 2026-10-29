@@ -307,6 +307,41 @@ class OtherProcessesTest {
     }
 
     @Test
+    void aPublishMustNameTheRecordedOwnerAsDonor(VertxTestContext ctx) {
+        numberOwned("P2", "DON")
+            .compose(v -> h.deliver("P1", "Publish", "NPP1XX261030000000510", "<publishType>Port</publishType>"
+                + "<fixed><fixedNumberSingle><numberType>S</numberType><number>" + PHONE + "</number></fixedNumberSingle></fixed>"))
+            .compose(ack -> h.number(PHONE))
+            .onComplete(ctx.succeeding(number -> ctx.verify(() -> {
+                assertEquals("P2", number.getString("current_code"), "no donor named: refused");
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void aPublishClaimingOurNativeNumberNeedsACompletedPortOut(VertxTestContext ctx) {
+        h.deliver("P1", "Publish", "NPP1LOC261030000000511", "<donor>LOC</donor><publishType>Port</publishType>"
+                + "<fixed><fixedNumberSingle><numberType>S</numberType><number>" + PHONE + "</number></fixedNumberSingle></fixed>")
+            .compose(ack -> h.number(PHONE))
+            .onComplete(ctx.succeeding(number -> ctx.verify(() -> {
+                assertNull(number, "unrecorded native number stays ours");
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void returnPublicationsForUnrecordedNumbersAreRefused(VertxTestContext ctx) {
+        h.deliver("P1", "Publish", "NPP1DON261030000000512", "<donor>P1</donor><originalOperator>DON</originalOperator>"
+                + "<publishType>Return</publishType><fixed><fixedNumberSingle><numberType>S</numberType><number>" + PHONE
+                + "</number></fixedNumberSingle></fixed>")
+            .compose(ack -> h.number(PHONE))
+            .onComplete(ctx.succeeding(number -> ctx.verify(() -> {
+                assertNull(number);
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
     void aStaleCancelPublishCannotRollBackNewerRouting(VertxTestContext ctx) {
         String publish = "<donor>DON</donor><publishType>Port</publishType><fixed><fixedNumberSingle><numberType>S</numberType>"
             + "<number>" + PHONE + "</number></fixedNumberSingle></fixed>";

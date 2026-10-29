@@ -1,5 +1,6 @@
 package cloud.cloudonix.npg.api;
 
+import cloud.cloudonix.npg.repository.AuditEventRepository;
 import io.vertx.core.Future;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
@@ -26,7 +27,7 @@ public class OperatorEndpointApiHandler {
             .map(RowJson::rowsToJsonArray);
     }
 
-    public Future<JsonObject> createEndpoint(String operatorCode, JsonObject body) {
+    public Future<JsonObject> createEndpoint(String operatorCode, JsonObject body, String actorId, String remoteIp) {
         String endpointType = body.getString("endpointType");
         String endpointUrl = body.getString("endpointUrl");
         if (endpointType == null || endpointType.isBlank()) {
@@ -56,19 +57,25 @@ public class OperatorEndpointApiHandler {
                     .execute(params)
                     .map(rs -> rs.property(MySQLClient.LAST_INSERTED_ID));
             })
+            .compose(id -> new AuditEventRepository(pool).insertAuditEvent("USER", actorId, "OPERATOR_ENDPOINT_CREATED",
+                    "OPERATOR", operatorCode, new JsonObject().put("endpointId", id).put("endpointType", endpointType)
+                        .put("endpointUrl", endpointUrl).put("tlsSubject", body.getString("tlsSubject"))
+                        .put("ipAllowlist", body.getString("ipAllowlist")).encode(), remoteIp)
+                .map(a -> id))
             .compose(id -> pool.preparedQuery("SELECT * FROM np_operator_endpoints WHERE id = ?")
                 .execute(Tuple.of(id))
                 .map(rows -> RowJson.rowToJson(rows.iterator().next())));
     }
 
-    public Future<Void> deleteEndpoint(String operatorCode, long endpointId) {
+    public Future<Void> deleteEndpoint(String operatorCode, long endpointId, String actorId, String remoteIp) {
         return findOperatorId(operatorCode)
             .compose(operatorId -> pool.preparedQuery(
                     "DELETE FROM np_operator_endpoints WHERE id = ? AND operator_id = ?")
                 .execute(Tuple.of(endpointId, operatorId)))
             .compose(rs -> rs.rowCount() == 0
                 ? Future.failedFuture(new ApiError(404, "Endpoint not found: " + endpointId))
-                : Future.succeededFuture());
+                : new AuditEventRepository(pool).insertAuditEvent("USER", actorId, "OPERATOR_ENDPOINT_DELETED", "OPERATOR",
+                    operatorCode, new JsonObject().put("endpointId", endpointId).encode(), remoteIp).mapEmpty());
     }
 
     private Future<Long> findOperatorId(String operatorCode) {

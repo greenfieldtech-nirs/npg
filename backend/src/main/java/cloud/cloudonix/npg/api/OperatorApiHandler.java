@@ -86,14 +86,23 @@ public class OperatorApiHandler {
             });
     }
 
-    public Future<Void> markDown(String operatorCode, String reason) {
-        return findOperatorId(operatorCode)
-            .compose(id -> operatorStatusService.markDown(id, reason));
-    }
-
-    public Future<Void> markUp(String operatorCode, String reason) {
-        return findOperatorId(operatorCode)
-            .compose(id -> operatorStatusService.markUp(id, reason));
+    /** NOC marks a peer down/up (e.g. it announced maintenance by phone); audited. */
+    public Future<Void> setAvailability(String operatorCode, String status, String reason, String actorId, String remoteIp) {
+        if (reason == null || reason.isBlank()) {
+            return Future.failedFuture(new ApiError(400, "A reason is required"));
+        }
+        return pool.withTransaction(tx -> tx.preparedQuery("SELECT id FROM np_operators WHERE operator_code = ?")
+            .execute(Tuple.of(operatorCode))
+            .compose(rows -> {
+                if (!rows.iterator().hasNext()) {
+                    return Future.failedFuture(new ApiError(404, "Operator not found: " + operatorCode));
+                }
+                return OperatorStatusService.setAvailability(tx, rows.iterator().next().getLong("id"), status, reason)
+                    .compose(v -> new AuditEventRepository(tx).insertAuditEvent("USER", actorId,
+                        "DOWN".equals(status) ? "OPERATOR_MARKED_DOWN" : "OPERATOR_MARKED_UP", "OPERATOR", operatorCode,
+                        new JsonObject().put("reason", reason).encode(), remoteIp))
+                    .mapEmpty();
+            }));
     }
 
     private Future<Void> clearOtherLocals(String operatorCode) {
@@ -117,14 +126,4 @@ public class OperatorApiHandler {
             .mapEmpty();
     }
 
-    private Future<Long> findOperatorId(String operatorCode) {
-        return pool.preparedQuery("SELECT id FROM np_operators WHERE operator_code = ?")
-            .execute(Tuple.of(operatorCode))
-            .map(rows -> {
-                if (!rows.iterator().hasNext()) {
-                    throw new IllegalStateException("Operator not found: " + operatorCode);
-                }
-                return rows.iterator().next().getLong("id");
-            });
-    }
 }

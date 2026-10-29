@@ -196,4 +196,16 @@ public final class StateMachines {
     public static java.util.Collection<Machine> all() {
         return MACHINES.values();
     }
+
+    /**
+     * States in which a workflow needs nothing more: every machine's terminal states plus the
+     * "done unless someone acts" states (a completed port can still have its publication cancelled,
+     * an applied publication can still be withdrawn by its publisher).
+     */
+    public static Set<String> finishedStates() {
+        Set<String> finished = new LinkedHashSet<>();
+        MACHINES.values().forEach(m -> m.states().stream().filter(m::isTerminal).forEach(finished::add));
+        finished.addAll(Set.of(FAILED, "COMPLETED", "PUBLICATION_APPLIED"));
+        return finished;
+    }
 }

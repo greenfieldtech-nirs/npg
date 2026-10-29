@@ -48,7 +48,7 @@ public class ManagementApiVerticle extends AbstractVerticle {
     private MessageApiHandler messageApiHandler;
     private OperatorApiHandler operatorApiHandler;
     private OperatorEndpointApiHandler operatorEndpointApiHandler;
-    private ManualTaskApiHandler manualTaskApiHandler;
+    private OperationsApiHandler operationsApiHandler;
     private NumberApiHandler numberApiHandler;
     private UserManagementApiHandler userManagementApiHandler;
     private PortingApiHandler portingApiHandler;
@@ -78,7 +78,7 @@ public class ManagementApiVerticle extends AbstractVerticle {
                     new OperatorRepository(pool), cacheService, pubSubService);
                 operatorApiHandler = new OperatorApiHandler(pool, cachedOperators, new AuditEventRepository(pool));
                 operatorEndpointApiHandler = new OperatorEndpointApiHandler(pool);
-                manualTaskApiHandler = new ManualTaskApiHandler(pool);
+                operationsApiHandler = new OperationsApiHandler(pool);
                 numberApiHandler = new NumberApiHandler(pool);
                 userManagementApiHandler = new UserManagementApiHandler(pool);
                 WorkflowServices services = WorkflowServices.create(vertx, pool, mongoFuture.result(),
@@ -135,9 +135,13 @@ public class ManagementApiVerticle extends AbstractVerticle {
         router.get("/api/workflows")
             .handler(guard.authenticated())
             .handler(ctx ->
-            handleJson(ctx, workflowApiHandler.searchWorkflows(
-                ctx.request().getParam("phoneNumber"),
-                ctx.request().getParam("state"),
+            handleJson(ctx, workflowApiHandler.searchWorkflows(new JsonObject()
+                    .put("phoneNumber", ctx.request().getParam("phoneNumber"))
+                    .put("state", ctx.request().getParam("state"))
+                    .put("requestId", ctx.request().getParam("requestId"))
+                    .put("workflowType", ctx.request().getParam("workflowType"))
+                    .put("localRole", ctx.request().getParam("localRole"))
+                    .put("operatorCode", ctx.request().getParam("operatorCode")),
                 intParam(ctx, "page", 0),
                 intParam(ctx, "size", 20))));
         router.get("/api/workflows/:workflowUuid")
@@ -252,11 +256,12 @@ public class ManagementApiVerticle extends AbstractVerticle {
             handleJson(ctx, operatorApiHandler.getOperator(ctx.pathParam("operatorCode"))));
         router.post("/api/operators/:operatorCode/mark-down")
             .handler(guard.requireAny("ADMIN", "MANAGER"))
-            .handler(ctx -> {
-                JsonObject body = jsonBody(ctx);
-                String reason = body != null ? body.getString("reason", "manual") : "manual";
-                handleEmpty(ctx, operatorApiHandler.markDown(ctx.pathParam("operatorCode"), reason));
-            });
+            .handler(ctx -> handleEmpty(ctx, operatorApiHandler.setAvailability(ctx.pathParam("operatorCode"), "DOWN",
+                jsonBody(ctx).getString("reason"), ctx.get("actorId"), remoteIp(ctx))));
+        router.post("/api/operators/:operatorCode/mark-up")
+            .handler(guard.requireAny("ADMIN", "MANAGER"))
+            .handler(ctx -> handleEmpty(ctx, operatorApiHandler.setAvailability(ctx.pathParam("operatorCode"), "UP",
+                jsonBody(ctx).getString("reason"), ctx.get("actorId"), remoteIp(ctx))));
 
         router.get("/api/operators/:operatorCode/endpoints")
             .handler(guard.authenticated())
@@ -265,24 +270,76 @@ public class ManagementApiVerticle extends AbstractVerticle {
         router.post("/api/operators/:operatorCode/endpoints")
             .handler(guard.requireAny("ADMIN"))
             .handler(ctx -> handleJson(ctx, operatorEndpointApiHandler.createEndpoint(
-                ctx.pathParam("operatorCode"), jsonBody(ctx))));
+                ctx.pathParam("operatorCode"), jsonBody(ctx), ctx.get("actorId"), remoteIp(ctx))));
         router.delete("/api/operators/:operatorCode/endpoints/:endpointId")
             .handler(guard.requireAny("ADMIN"))
             .handler(ctx -> handleEmpty(ctx, operatorEndpointApiHandler.deleteEndpoint(
-                ctx.pathParam("operatorCode"), longPathParam(ctx, "endpointId"))));
+                ctx.pathParam("operatorCode"), longPathParam(ctx, "endpointId"), ctx.get("actorId"), remoteIp(ctx))));
 
         router.get("/api/manual-tasks")
             .handler(guard.authenticated())
-            .handler(ctx ->
-            handleJson(ctx, manualTaskApiHandler.listTasks(ctx.request().getParam("status"))));
+            .handler(ctx -> handleJson(ctx, operationsApiHandler.listTasks(ctx.request().getParam("status"))));
+        router.get("/api/manual-tasks/:taskUuid")
+            .handler(guard.authenticated())
+            .handler(ctx -> handleJson(ctx, operationsApiHandler.getTask(ctx.pathParam("taskUuid"))));
+        router.post("/api/manual-tasks/:taskUuid/assign")
+            .handler(guard.requireAny("ADMIN", "MANAGER"))
+            .handler(ctx -> handleEmpty(ctx, operationsApiHandler.assignTask(ctx.pathParam("taskUuid"), jsonBody(ctx),
+                ctx.get("actorId"), remoteIp(ctx))));
+        router.post("/api/manual-tasks/:taskUuid/notes")
+            .handler(guard.requireAny("ADMIN", "MANAGER"))
+            .handler(ctx -> handleEmpty(ctx, operationsApiHandler.addNote(ctx.pathParam("taskUuid"), jsonBody(ctx),
+                ctx.get("actorId"), remoteIp(ctx))));
         router.post("/api/manual-tasks/:taskUuid/resolve")
             .handler(guard.requireAny("ADMIN", "MANAGER"))
-            .handler(ctx -> {
-                JsonObject body = jsonBody(ctx);
-                handleEmpty(ctx, manualTaskApiHandler.resolveTask(
-                    ctx.pathParam("taskUuid"),
-                    body != null ? body.getString("resolution") : null));
-            });
+            .handler(ctx -> handleEmpty(ctx, operationsApiHandler.resolveTask(ctx.pathParam("taskUuid"), jsonBody(ctx),
+                ctx.get("actorId"), remoteIp(ctx))));
+
+        router.get("/api/outbox")
+            .handler(guard.authenticated())
+            .handler(ctx -> handleJson(ctx, operationsApiHandler.listOutbox(ctx.request().getParam("status"),
+                intParam(ctx, "page", 0), intParam(ctx, "size", 50))));
+        router.post("/api/outbox/:outboxUuid/retry")
+            .handler(guard.requireAny("ADMIN", "MANAGER"))
+            .handler(ctx -> handleEmpty(ctx, operationsApiHandler.retryOutbox(ctx.pathParam("outboxUuid"), jsonBody(ctx),
+                ctx.get("actorId"), remoteIp(ctx))));
+        router.post("/api/outbox/:outboxUuid/mark-delivered")
+            .handler(guard.requireAny("ADMIN", "MANAGER"))
+            .handler(ctx -> handleEmpty(ctx, operationsApiHandler.markOutboxDelivered(ctx.pathParam("outboxUuid"), jsonBody(ctx),
+                ctx.get("actorId"), remoteIp(ctx))));
+        router.post("/api/outbox/:outboxUuid/cancel")
+            .handler(guard.requireAny("ADMIN", "MANAGER"))
+            .handler(ctx -> handleEmpty(ctx, operationsApiHandler.cancelOutbox(ctx.pathParam("outboxUuid"), jsonBody(ctx),
+                ctx.get("actorId"), remoteIp(ctx))));
+        router.get("/api/inbox")
+            .handler(guard.authenticated())
+            .handler(ctx -> handleJson(ctx, operationsApiHandler.listInbox(ctx.request().getParam("status"),
+                intParam(ctx, "page", 0), intParam(ctx, "size", 50))));
+        router.post("/api/inbox/:inboxUuid/retry")
+            .handler(guard.requireAny("ADMIN", "MANAGER"))
+            .handler(ctx -> handleEmpty(ctx, operationsApiHandler.retryInbox(ctx.pathParam("inboxUuid"), jsonBody(ctx),
+                ctx.get("actorId"), remoteIp(ctx))));
+        router.get("/api/timers")
+            .handler(guard.authenticated())
+            .handler(ctx -> handleJson(ctx, operationsApiHandler.listTimers(ctx.request().getParam("status"),
+                intParam(ctx, "page", 0), intParam(ctx, "size", 50))));
+        router.post("/api/timers/:timerUuid/cancel")
+            .handler(guard.requireAny("ADMIN", "MANAGER"))
+            .handler(ctx -> handleEmpty(ctx, operationsApiHandler.cancelTimer(ctx.pathParam("timerUuid"), jsonBody(ctx),
+                ctx.get("actorId"), remoteIp(ctx))));
+        router.post("/api/timers/:timerUuid/fire-now")
+            .handler(guard.requireAny("ADMIN", "MANAGER"))
+            .handler(ctx -> handleEmpty(ctx, operationsApiHandler.fireTimerNow(ctx.pathParam("timerUuid"), jsonBody(ctx),
+                ctx.get("actorId"), remoteIp(ctx))));
+        router.get("/api/workflows/:workflowUuid/timers")
+            .handler(guard.authenticated())
+            .handler(ctx -> handleJson(ctx, operationsApiHandler.workflowTimers(ctx.pathParam("workflowUuid"))));
+        router.get("/api/workflows/:workflowUuid/messages")
+            .handler(guard.authenticated())
+            .handler(ctx -> handleJson(ctx, operationsApiHandler.workflowMessages(ctx.pathParam("workflowUuid"))));
+        router.get("/api/workflows/:workflowUuid/publication")
+            .handler(guard.authenticated())
+            .handler(ctx -> handleJson(ctx, operationsApiHandler.workflowPublication(ctx.pathParam("workflowUuid"))));
 
         router.get("/api/users")
             .handler(guard.requireAny("ADMIN"))
