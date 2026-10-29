@@ -150,24 +150,70 @@ class SecurityConfigTest {
     }
 
     @Test
-    void saturatedTableOfLockedKeysFailsClosedForNewKeys() {
+    void saturatedTableOfLockedKeysEvictsOldestInsteadOfRefusingEveryone() {
         LoginThrottle throttle = new LoginThrottle(1, Duration.ofMinutes(5), new MutableClock(), 3);
         for (String k : new String[]{"a", "b", "c"}) {
             assertTrue(throttle.tryAcquire(k));
         }
-        assertFalse(throttle.tryAcquire("d"));
+        assertTrue(throttle.tryAcquire("d"), "new keys must still be served when the table is full");
         assertEquals(3, throttle.trackedKeys());
     }
 
     @Test
-    void knownLoginSourcesExpire() {
+    void releaseReturnsOnlyOneReservation() {
+        LoginThrottle throttle = new LoginThrottle(2, Duration.ofMinutes(5), new MutableClock());
+        assertTrue(throttle.tryAcquire("ip"));   // failed attempt, kept
+        assertTrue(throttle.tryAcquire("ip"));   // successful attempt...
+        throttle.release("ip");                  // ...gives its own slot back
+        assertTrue(throttle.tryAcquire("ip"));
+        assertFalse(throttle.tryAcquire("ip"));
+    }
+
+    @Test
+    void deviceTrustIsBoundToAccountSignatureAndExpiry() {
         MutableClock clock = new MutableClock();
-        KnownLoginSources known = new KnownLoginSources(Duration.ofHours(24), clock, 10);
-        known.remember("id:1", "10.0.0.1");
-        assertTrue(known.isKnown("id:1", "10.0.0.1"));
-        assertFalse(known.isKnown("id:1", "10.0.0.2"));
-        clock.advance(Duration.ofHours(25));
-        assertFalse(known.isKnown("id:1", "10.0.0.1"));
+        JwtService signer = new JwtService("z".repeat(40));
+        DeviceTrust trust = new DeviceTrust(signer, Duration.ofDays(30), clock);
+        String token = trust.issue(7L);
+        assertTrue(trust.isTrusted(token, 7L));
+        assertFalse(trust.isTrusted(token, 8L), "token for another account");
+        assertFalse(trust.isTrusted(token.replace("v1.7.", "v1.8."), 8L), "re-targeted token");
+        assertFalse(new DeviceTrust(new JwtService("q".repeat(40)), Duration.ofDays(30), clock).isTrusted(token, 7L),
+            "signed with another secret");
+        assertFalse(trust.isTrusted("garbage", 7L));
+        assertFalse(trust.isTrusted(null, 7L));
+        clock.advance(Duration.ofDays(31));
+        assertFalse(trust.isTrusted(token, 7L), "expired");
+    }
+
+    @Test
+    void deviceTrustSignatureCannotBeReplayedAsJwt() {
+        JwtService signer = new JwtService("z".repeat(40));
+        String token = new DeviceTrust(signer, Duration.ofDays(1), Clock.systemUTC()).issue(1L);
+        assertTrue(signer.verify(token).isEmpty());
+    }
+
+    @Test
+    void forwardedHeadersOnlyHonouredFromTrustedProxies() {
+        ClientAddress resolver = new ClientAddress(java.util.List.of("10.0.0.0/8"));
+        assertEquals("203.0.113.9", resolver.resolve("10.1.2.3", "203.0.113.9", null));
+        assertEquals("203.0.113.9", resolver.resolve("10.1.2.3", null, "1.1.1.1, 203.0.113.9"));
+        // a direct client cannot pick its own address
+        assertEquals("198.51.100.4", resolver.resolve("198.51.100.4", "10.9.9.9", "10.9.9.9"));
+        assertEquals("10.1.2.3", resolver.resolve("10.1.2.3", null, null));
+    }
+
+    @Test
+    void privateKeywordAndIpv6Ranges() {
+        ClientAddress resolver = new ClientAddress(java.util.List.of("private"));
+        assertTrue(resolver.isTrusted("172.20.0.5"));
+        assertTrue(resolver.isTrusted("127.0.0.1"));
+        assertTrue(resolver.isTrusted("::1"));
+        assertTrue(resolver.isTrusted("fd00::1"));
+        assertFalse(resolver.isTrusted("8.8.8.8"));
+        assertFalse(resolver.isTrusted("172.32.0.1"));
+        assertFalse(resolver.isTrusted("not-an-ip"), "hostnames are never resolved");
+        assertFalse(new ClientAddress(java.util.List.of("")).isTrusted("127.0.0.1"), "trust nothing by default");
     }
 
     @Test

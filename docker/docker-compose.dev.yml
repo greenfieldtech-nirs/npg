@@ -62,6 +62,7 @@ services:
     environment:
       APP_ROLE: all
       NPG_ENV: dev
+      TRUSTED_PROXIES: private
       API_PORT: "8080"
       PORT: "8081"
       DB_HOST: db

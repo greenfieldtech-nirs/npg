@@ -1,7 +1,9 @@
 package cloud.cloudonix.npg.api;
 
-import cloud.cloudonix.npg.config.Env;
 import cloud.cloudonix.npg.api.security.JwtAuthHandler;
+import cloud.cloudonix.npg.config.Env;
+import cloud.cloudonix.npg.security.ClientAddress;
+import cloud.cloudonix.npg.security.DeviceTrust;
 import cloud.cloudonix.npg.security.JwtService;
 import cloud.cloudonix.npg.security.UserRepository;
 import cloud.cloudonix.npg.audit.XmlAuditService;
@@ -16,6 +18,8 @@ import cloud.cloudonix.npg.service.PubSubService;
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.Future;
 import io.vertx.core.Promise;
+import io.vertx.core.http.Cookie;
+import io.vertx.core.http.CookieSameSite;
 import io.vertx.core.impl.logging.Logger;
 import io.vertx.core.impl.logging.LoggerFactory;
 import io.vertx.core.json.DecodeException;
@@ -34,6 +38,7 @@ public class ManagementApiVerticle extends AbstractVerticle {
     static final long MAX_BODY_BYTES = 1024 * 1024;
 
     private JwtAuthHandler.Guard guard;
+    private final ClientAddress clientAddress = ClientAddress.fromEnvironment();
     private AuthApiHandler authApiHandler;
     private DashboardApiHandler dashboardApiHandler;
     private WorkflowApiHandler workflowApiHandler;
@@ -92,8 +97,7 @@ public class ManagementApiVerticle extends AbstractVerticle {
         router.get("/health/live").respond(ctx -> Future.succeededFuture("OK"));
         router.get("/health/ready").respond(ctx -> Future.succeededFuture("OK"));
 
-        router.post("/api/auth/login").handler(ctx ->
-            handleJson(ctx, authApiHandler.login(jsonBody(ctx), remoteIp(ctx))));
+        router.post("/api/auth/login").handler(this::login);
         router.get("/api/auth/me")
             .handler(guard.authenticated())
             .handler(ctx -> {
@@ -169,8 +173,7 @@ public class ManagementApiVerticle extends AbstractVerticle {
         router.get("/api/messages/:messageUuid/xml")
             .handler(guard.authenticated())
             .handler(ctx -> {
-            String remoteIp = ctx.request().remoteAddress() != null ? ctx.request().remoteAddress().host() : null;
-            messageApiHandler.getMessageXml(ctx.pathParam("messageUuid"), ctx.get("actorId"), remoteIp)
+            messageApiHandler.getMessageXml(ctx.pathParam("messageUuid"), ctx.get("actorId"), remoteIp(ctx))
                 .onSuccess(xml -> ctx.response()
                     .putHeader("Content-Type", "application/xml")
                     .end(xml))
@@ -293,8 +296,24 @@ public class ManagementApiVerticle extends AbstractVerticle {
             }));
     }
 
-    private static String remoteIp(RoutingContext ctx) {
-        return ctx.request().remoteAddress() != null ? ctx.request().remoteAddress().host() : null;
+    /** Real client address (forwarding headers honoured only from TRUSTED_PROXIES). */
+    private String remoteIp(RoutingContext ctx) {
+        return clientAddress.resolve(ctx.request());
+    }
+
+    private void login(RoutingContext ctx) {
+        Cookie device = ctx.request().getCookie(DeviceTrust.COOKIE_NAME);
+        authApiHandler.login(jsonBody(ctx), remoteIp(ctx), device != null ? device.getValue() : null)
+            .onSuccess(result -> {
+                ctx.response().addCookie(Cookie.cookie(DeviceTrust.COOKIE_NAME, result.deviceToken())
+                    .setHttpOnly(true)
+                    .setSecure(!Env.isDevMode())
+                    .setSameSite(CookieSameSite.STRICT)
+                    .setPath("/api/auth")
+                    .setMaxAge(authApiHandler.deviceTrust().ttl().getSeconds()));
+                ctx.response().putHeader("Content-Type", "application/json").end(result.body().encode());
+            })
+            .onFailure(err -> error(ctx, err));
     }
 
     private void handleJson(RoutingContext ctx, Future<?> future) {

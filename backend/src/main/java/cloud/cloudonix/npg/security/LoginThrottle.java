@@ -9,14 +9,17 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * Brute-force brake for the login endpoint. Each attempt must first reserve a slot with
- * {@link #tryAcquire}; the slot is only given back by {@link #reset} on a successful login, so
- * concurrent in-flight guesses count against the limit too (no check-then-record race).
+ * Sliding-window attempt limiter for the login endpoint. Each attempt must first reserve a slot
+ * with {@link #tryAcquire}; slots are only given back by {@link #release} (one successful attempt)
+ * or {@link #reset}, so concurrent in-flight guesses count against the limit (no check-then-record
+ * race).
  *
  * <p>Per-process and non-durable by design — a restart only resets the brake, never affects
- * correctness. Memory is bounded at {@code maxKeys}: aged-out and below-limit entries are evicted
- * first, but a key that is currently locked is never evicted. If the table is full of locked keys,
- * new keys are refused (fail closed) rather than letting a flood erase existing locks.
+ * correctness. Memory is bounded at {@code maxKeys}: when full, keys below the limit are evicted
+ * first (least recently touched), and only if every key is locked is the oldest locked key
+ * dropped. That last resort is acceptable because callers key tables so that saturating them is
+ * either impossible (one entry per real account) or requires more distinct client addresses than
+ * an IP-based limit can stop anyway.
  */
 public class LoginThrottle {
 
@@ -40,16 +43,12 @@ public class LoginThrottle {
         this(maxAttempts, window, clock, DEFAULT_MAX_KEYS);
     }
 
-    /**
-     * Reserves an attempt for {@code key}. Returns false (and reserves nothing) when the key
-     * already used {@code maxAttempts} within the window, or when it is a new key and the table is
-     * saturated with locked keys.
-     */
+    /** Reserves an attempt for {@code key}; false (nothing reserved) when the window is full. */
     public synchronized boolean tryAcquire(String key) {
         Deque<Long> recent = attempts.get(key);
         if (recent == null) {
-            if (attempts.size() >= maxKeys && !makeRoom()) {
-                return false;
+            if (attempts.size() >= maxKeys) {
+                makeRoom();
             }
             recent = new ArrayDeque<>();
             attempts.put(key, recent);
@@ -60,6 +59,14 @@ public class LoginThrottle {
         }
         recent.addLast(clock.millis());
         return true;
+    }
+
+    /** Gives back the most recent reservation (the attempt turned out to be legitimate). */
+    public synchronized void release(String key) {
+        Deque<Long> recent = attempts.get(key);
+        if (recent != null && !recent.isEmpty()) {
+            recent.removeLast();
+        }
     }
 
     /** Clears the key after a successful login, returning its reserved slots. */
@@ -78,17 +85,21 @@ public class LoginThrottle {
         }
     }
 
-    /** Evicts one unlocked entry (least recently touched first); false if every entry is locked. */
-    private boolean makeRoom() {
+    /** Evicts the least recently touched unlocked key, or failing that the least recently touched key. */
+    private void makeRoom() {
         Iterator<Map.Entry<String, Deque<Long>>> it = attempts.entrySet().iterator();
         while (it.hasNext()) {
             Deque<Long> recent = it.next().getValue();
             prune(recent);
             if (recent.size() < maxAttempts) {
                 it.remove();
-                return true;
+                return;
             }
         }
-        return false;
+        it = attempts.entrySet().iterator();
+        if (it.hasNext()) {
+            it.next();
+            it.remove();
+        }
     }
 }

@@ -45,6 +45,8 @@ class ManagementApiTest {
     static void setUpClass(Vertx v, VertxTestContext ctx) {
         vertx = v;
         System.setProperty("NPG_ENV", "test");
+        // every request here comes from 127.0.0.1; per-IP limiting is covered by dedicated tests
+        System.setProperty("LOGIN_MAX_ATTEMPTS_PER_IP", "100000");
         TestDatabase.start();
         TestMongo.start();
         System.setProperty("DB_HOST", TestDatabase.host());
@@ -817,7 +819,7 @@ class ManagementApiTest {
         // dedicated account: the throttle is shared by every test in this class
         JsonObject bad = new JsonObject().put("username", "bruteforced").put("password", "wrong");
         Future<Integer> chain = seedUser("bruteforced", "correct-password", "USER").map(0);
-        for (int i = 0; i < 5; i++) {
+        for (int i = 0; i < 10; i++) { // default per-account limit
             chain = chain.compose(x -> webClient.post("/api/auth/login").sendJsonObject(bad).map(r -> r.statusCode()));
         }
         chain.compose(last -> webClient.post("/api/auth/login")
@@ -834,7 +836,7 @@ class ManagementApiTest {
         // all resolve to the same account under utf8mb4_unicode_ci (case, trailing space, accents)
         String[] variants = {"Sprayed", "SPRAYED", "sprayed ", "spräyed", "SPRÄYED"};
         Future<Integer> chain = seedUser("sprayed", "correct-password", "USER").map(0);
-        for (String variant : variants) {
+        for (String variant : java.util.stream.Stream.of(variants, variants).flatMap(java.util.Arrays::stream).toList()) {
             chain = chain.compose(x -> webClient.post("/api/auth/login")
                 .sendJsonObject(new JsonObject().put("username", variant).put("password", "wrong"))
                 .map(r -> r.statusCode()));
@@ -848,29 +850,51 @@ class ManagementApiTest {
     }
 
     @Test
-    void sprayingAnAccountDoesNotLockOutItsKnownOwner(VertxTestContext ctx) {
-        AuthApiHandler handler = new AuthApiHandler(vertx, pool, JwtService.fromEnvironment(),
-            new cloud.cloudonix.npg.security.LoginThrottle(5, Duration.ofMinutes(5), java.time.Clock.systemUTC()),
+    void sprayingAnAccountDoesNotLockOutItsOwnersTrustedDevice(VertxTestContext ctx) {
+        JwtService jwt = JwtService.fromEnvironment();
+        cloud.cloudonix.npg.security.DeviceTrust trust =
+            new cloud.cloudonix.npg.security.DeviceTrust(jwt, Duration.ofDays(30), java.time.Clock.systemUTC());
+        AuthApiHandler handler = new AuthApiHandler(vertx, pool, jwt, trust,
+            new cloud.cloudonix.npg.security.LoginThrottle(100, Duration.ofMinutes(5), java.time.Clock.systemUTC()),
             new cloud.cloudonix.npg.security.LoginThrottle(3, Duration.ofMinutes(15), java.time.Clock.systemUTC()),
-            new cloud.cloudonix.npg.security.KnownLoginSources(Duration.ofHours(24), java.time.Clock.systemUTC(), 100));
+            16);
         JsonObject good = new JsonObject().put("username", "owner").put("password", "owner-password");
         JsonObject bad = new JsonObject().put("username", "owner").put("password", "guess");
+        java.util.concurrent.atomic.AtomicReference<String> ownerDevice = new java.util.concurrent.atomic.AtomicReference<>();
         seedUser("owner", "owner-password", "USER")
-            .compose(v -> handler.login(good, "10.0.0.1"))                       // owner's usual source
-            .compose(v -> handler.login(bad, "10.0.0.2").recover(e -> Future.succeededFuture()))
-            .compose(v -> handler.login(bad, "10.0.0.3").recover(e -> Future.succeededFuture()))
-            .compose(v -> handler.login(bad, "10.0.0.4").recover(e -> Future.succeededFuture()))
-            .compose(v -> handler.login(good, "10.0.0.5")                       // account limit reached
-                .map(ok -> "unexpected success")
-                .recover(e -> Future.succeededFuture(((ApiError) e).status + "")))
+            .compose(v -> handler.login(good, "10.0.0.1", null))                 // owner's browser
+            .onSuccess(r -> ownerDevice.set(r.deviceToken()))
+            .compose(v -> handler.login(bad, "10.0.0.2", null).recover(e -> Future.succeededFuture()))
+            .compose(v -> handler.login(bad, "10.0.0.3", null).recover(e -> Future.succeededFuture()))
+            .compose(v -> handler.login(bad, "10.0.0.4", null).recover(e -> Future.succeededFuture()))
+            .compose(v -> statusOf(handler.login(good, "10.0.0.5", null)))       // account limit reached
             .compose(status -> {
-                ctx.verify(() -> assertEquals("429", status));
-                return handler.login(good, "10.0.0.1");                          // known source still works
+                ctx.verify(() -> assertEquals(429, status));
+                return handler.login(good, "10.0.0.6", ownerDevice.get());         // trusted device still works
             })
-            .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
-                assertNotNull(resp.getString("token"));
+            .onComplete(ctx.succeeding(result -> ctx.verify(() -> {
+                assertNotNull(result.body().getString("token"));
                 ctx.completeNow();
             })));
+    }
+
+    @Test
+    void loginSetsHttpOnlyDeviceCookie(VertxTestContext ctx) {
+        webClient.post("/api/auth/login")
+            .sendJsonObject(new JsonObject().put("username", "admin").put("password", "admin123"))
+            .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
+                assertEquals(200, resp.statusCode(), resp.bodyAsString());
+                String cookie = resp.cookies().stream().filter(c -> c.startsWith("npg_device=")).findFirst().orElse("");
+                String attributes = cookie.toLowerCase(java.util.Locale.ROOT); // attribute names are case-insensitive
+                assertTrue(attributes.contains("httponly"), cookie);
+                assertTrue(attributes.contains("samesite=strict"), cookie);
+                assertTrue(attributes.contains("path=/api/auth"), cookie);
+                ctx.completeNow();
+            })));
+    }
+
+    private static Future<Integer> statusOf(Future<?> attempt) {
+        return attempt.map(ok -> 200).recover(e -> Future.succeededFuture(((ApiError) e).status));
     }
 
     /** Real signed token for the seeded ADMIN user — the API re-checks the user in the DB. */

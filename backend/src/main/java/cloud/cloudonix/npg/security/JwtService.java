@@ -101,6 +101,22 @@ public class JwtService {
         }
     }
 
+    /**
+     * HMAC signature for non-JWT values (e.g. device-trust cookies). The purpose is mixed into the
+     * signed input so a signature made for one purpose can never be replayed as another.
+     */
+    public String signDetached(String purpose, String payload) {
+        return sign("detached:" + purpose + "\n" + payload);
+    }
+
+    public boolean verifyDetached(String purpose, String payload, String signature) {
+        if (signature == null) {
+            return false;
+        }
+        return MessageDigest.isEqual(signDetached(purpose, payload).getBytes(StandardCharsets.UTF_8),
+            signature.getBytes(StandardCharsets.UTF_8));
+    }
+
     private String sign(String signingInput) {
         try {
             Mac mac = Mac.getInstance("HmacSHA256");

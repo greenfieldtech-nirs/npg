@@ -1,7 +1,8 @@
 package cloud.cloudonix.npg.api;
 
+import cloud.cloudonix.npg.config.Env;
+import cloud.cloudonix.npg.security.DeviceTrust;
 import cloud.cloudonix.npg.security.JwtService;
-import cloud.cloudonix.npg.security.KnownLoginSources;
 import cloud.cloudonix.npg.security.LoginThrottle;
 import cloud.cloudonix.npg.security.PasswordService;
 import cloud.cloudonix.npg.security.UserRepository;
@@ -14,8 +15,21 @@ import io.vertx.sqlclient.Pool;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
-import java.util.Locale;
+import java.util.concurrent.atomic.AtomicInteger;
 
+/**
+ * Login and identity endpoints.
+ *
+ * <p>Brute-force defence, in order:
+ * <ol>
+ *   <li>a per-client-IP limit, which also covers unknown usernames;</li>
+ *   <li>a per-account limit keyed on the database id — the collation decides which strings name
+ *       the same account, so only the database's own match is a safe key, and the table can never
+ *       hold more entries than there are accounts. A valid device-trust cookie for the account
+ *       skips this limit, so spraying an account cannot lock its owner out;</li>
+ *   <li>a cap on concurrent password verifications (bcrypt is deliberately expensive).</li>
+ * </ol>
+ */
 public class AuthApiHandler {
 
     private static final Duration TOKEN_TTL = Duration.ofHours(8);
@@ -23,41 +37,43 @@ public class AuthApiHandler {
     // compared against when the username is unknown, so response time does not reveal which exist
     private static final String DUMMY_HASH = PasswordService.hash("npg-timing-equaliser");
 
+    /** Successful login: response body plus a fresh device-trust token for the cookie. */
+    public record LoginResult(JsonObject body, String deviceToken) {
+    }
+
     private final Vertx vertx;
     private final UserRepository userRepository;
     private final JwtService jwtService;
-    // per account+source: stops one client guessing; per account: stops rotating sources
-    private final LoginThrottle perSource;
+    private final DeviceTrust deviceTrust;
+    private final LoginThrottle perIp;
     private final LoginThrottle perAccount;
-    private final KnownLoginSources knownSources;
+    private final int maxConcurrentVerifications;
+    private final AtomicInteger verificationsInFlight = new AtomicInteger();
 
     public AuthApiHandler(Vertx vertx, Pool pool, JwtService jwtService) {
         this(vertx, pool, jwtService,
-            new LoginThrottle(5, Duration.ofMinutes(5), Clock.systemUTC()),
-            new LoginThrottle(20, Duration.ofMinutes(15), Clock.systemUTC()),
-            new KnownLoginSources(Duration.ofHours(24), Clock.systemUTC(), 50_000));
+            new DeviceTrust(jwtService, Duration.ofDays(30), Clock.systemUTC()),
+            new LoginThrottle(Env.getInt("LOGIN_MAX_ATTEMPTS_PER_IP", 20), Duration.ofMinutes(5), Clock.systemUTC()),
+            new LoginThrottle(Env.getInt("LOGIN_MAX_ATTEMPTS_PER_ACCOUNT", 10), Duration.ofMinutes(15), Clock.systemUTC()),
+            Env.getInt("LOGIN_MAX_CONCURRENT_VERIFICATIONS", 16));
     }
 
-    AuthApiHandler(Vertx vertx, Pool pool, JwtService jwtService, LoginThrottle perSource,
-                   LoginThrottle perAccount, KnownLoginSources knownSources) {
+    AuthApiHandler(Vertx vertx, Pool pool, JwtService jwtService, DeviceTrust deviceTrust,
+                   LoginThrottle perIp, LoginThrottle perAccount, int maxConcurrentVerifications) {
         this.vertx = vertx;
         this.userRepository = new UserRepository(pool);
         this.jwtService = jwtService;
-        this.perSource = perSource;
+        this.deviceTrust = deviceTrust;
+        this.perIp = perIp;
         this.perAccount = perAccount;
-        this.knownSources = knownSources;
+        this.maxConcurrentVerifications = maxConcurrentVerifications;
     }
 
-    /**
-     * Throttle key for a login attempt. When the database matched an account, the key is that
-     * account's id — the collation decides which strings name the same user ("Admin ", "ädmin"...),
-     * so only the database identity is a safe key. Unknown names have no account to protect.
-     */
-    static String accountKey(UserRepository.UserRecord user, String username) {
-        return user != null ? "id:" + user.id() : "unknown:" + username.strip().toLowerCase(Locale.ROOT);
+    public DeviceTrust deviceTrust() {
+        return deviceTrust;
     }
 
-    public Future<JsonObject> login(JsonObject body, String remoteIp) {
+    public Future<LoginResult> login(JsonObject body, String clientIp, String deviceToken) {
         String username = body != null ? body.getString("username") : null;
         String password = body != null ? body.getString("password") : null;
         if (username == null || username.isBlank() || password == null || password.isEmpty()) {
@@ -66,33 +82,48 @@ public class AuthApiHandler {
         if (username.length() > MAX_USERNAME_LENGTH) {
             return Future.failedFuture(new ApiError(400, "username is too long"));
         }
+        String ipKey = String.valueOf(clientIp);
+        if (!perIp.tryAcquire(ipKey)) {
+            return Future.failedFuture(tooManyAttempts());
+        }
         return userRepository.findByUsername(username).compose(user -> {
-            String account = accountKey(user, username);
-            String sourceKey = account + "|" + remoteIp;
-            // reserve the attempt before verifying so concurrent guesses count while in flight;
-            // a source that recently logged in to this account is exempt from the account-wide
-            // limit, so spraying from elsewhere cannot lock the owner out
-            boolean allowed = perSource.tryAcquire(sourceKey)
-                && (knownSources.isKnown(account, remoteIp) || perAccount.tryAcquire(account));
-            if (!allowed) {
-                return Future.failedFuture(new ApiError(429, "Too many failed login attempts, try again later"));
+            String accountKey = user != null ? "id:" + user.id() : null;
+            boolean countsAgainstAccount = user != null && !deviceTrust.isTrusted(deviceToken, user.id());
+            if (countsAgainstAccount && !perAccount.tryAcquire(accountKey)) {
+                return Future.failedFuture(tooManyAttempts());
+            }
+            if (verificationsInFlight.incrementAndGet() > maxConcurrentVerifications) {
+                verificationsInFlight.decrementAndGet();
+                // overload is not a credential failure: give the reservations back
+                perIp.release(ipKey);
+                if (countsAgainstAccount) {
+                    perAccount.release(accountKey);
+                }
+                return Future.failedFuture(new ApiError(503, "Login is busy, retry shortly"));
             }
             String hash = user != null ? user.passwordHash() : DUMMY_HASH;
             // bcrypt is deliberately slow: keep it off the event loop
             return vertx.executeBlocking(() -> PasswordService.verify(password, hash), false)
+                .onComplete(ar -> verificationsInFlight.decrementAndGet())
                 .compose(matches -> {
                     if (user == null || !user.active() || !matches) {
                         return Future.failedFuture(new ApiError(401, "Invalid credentials"));
                     }
-                    perSource.reset(sourceKey);
-                    perAccount.reset(account);
-                    knownSources.remember(account, remoteIp);
+                    // a success returns only its own reservation; earlier failures keep counting
+                    perIp.release(ipKey);
+                    perAccount.reset(accountKey);
                     return userRepository.findRoles(user.id())
-                        .map(roles -> new JsonObject()
-                            .put("token", jwtService.issue(user.username(), roles, TOKEN_TTL))
-                            .put("user", userPayload(user.username(), user.displayName(), roles)));
+                        .map(roles -> new LoginResult(
+                            new JsonObject()
+                                .put("token", jwtService.issue(user.username(), roles, TOKEN_TTL))
+                                .put("user", userPayload(user.username(), user.displayName(), roles)),
+                            deviceTrust.issue(user.id())));
                 });
         });
+    }
+
+    private static ApiError tooManyAttempts() {
+        return new ApiError(429, "Too many failed login attempts, try again later");
     }
 
     public JsonObject me(String username, List<String> roles) {
