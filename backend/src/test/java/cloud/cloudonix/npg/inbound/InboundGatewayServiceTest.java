@@ -138,4 +138,40 @@ class InboundGatewayServiceTest {
                 ctx.completeNow();
             })));
     }
+
+    @Test
+    void concurrentDuplicatesProduceOneAckAndOneInboxRow(VertxTestContext ctx) {
+        service = newService();
+        String xml = "<Check>" +
+            "<senderOperator>OP01</senderOperator>" +
+            "<receiverOperator>OP02</receiverOperator>" +
+            "<messageType>Check</messageType>" +
+            "<requestId>REQ-RACE</requestId>" +
+            "<transactionId>TX-RACE-1</transactionId>" +
+            "<protocolVersion>4.0</protocolVersion>" +
+            "<PhoneNumber>972501234567</PhoneNumber>" +
+            "</Check>";
+        XmlTransportMetadata transport = new XmlTransportMetadata("HTTPS", "1.2.3.4", null, new JsonObject());
+        java.util.List<io.vertx.core.Future<cloud.cloudonix.npg.acknack.TechnicalAck>> racing = new java.util.ArrayList<>();
+        for (int i = 0; i < 6; i++) {
+            racing.add(service.receive(xml, transport));
+        }
+        io.vertx.core.Future.all(racing)
+            .compose(all -> pool.preparedQuery("""
+                    SELECT COUNT(*) AS c FROM np_inbox i JOIN np_messages m ON m.id = i.message_id
+                    WHERE m.request_id = 'REQ-RACE'
+                    """).execute()
+                .map(rows -> {
+                    long acks = racing.stream().filter(f -> f.result().status() == TechnicalAckStatus.ACK).count();
+                    long dupNacks = racing.stream().filter(f -> f.result().nackReason() != null
+                        && "NACK_DUPLICATE_MESSAGE".equals(f.result().nackReason().code())).count();
+                    return new long[]{acks, dupNacks, rows.iterator().next().getLong("c")};
+                }))
+            .onComplete(ctx.succeeding(counts -> ctx.verify(() -> {
+                assertEquals(1, counts[0], "exactly one ACK");
+                assertEquals(5, counts[1], "every other copy is a duplicate NACK, never an error");
+                assertEquals(1, counts[2], "exactly one inbox item");
+                ctx.completeNow();
+            })));
+    }
 }

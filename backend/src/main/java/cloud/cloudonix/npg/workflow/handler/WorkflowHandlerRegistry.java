@@ -3,6 +3,7 @@ package cloud.cloudonix.npg.workflow.handler;
 import cloud.cloudonix.npg.audit.XmlAuditService;
 import cloud.cloudonix.npg.number.NumberOwnershipService;
 import cloud.cloudonix.npg.protocol.ProtocolCatalogLoader;
+import cloud.cloudonix.npg.worker.PermanentProcessingException;
 import cloud.cloudonix.npg.workflow.WorkflowEngine;
 import io.vertx.core.Future;
 import io.vertx.sqlclient.Pool;
@@ -30,9 +31,9 @@ public class WorkflowHandlerRegistry {
     public Future<Void> handle(Row inboxItem) {
         String itemType = inboxItem.getString("item_type");
         String family = resolveFamily(itemType);
-        WorkflowHandler handler = handlers.get(family);
+        WorkflowHandler handler = family != null ? handlers.get(family) : null;
         if (handler == null) {
-            return Future.failedFuture("No handler for message family: " + family);
+            return Future.failedFuture(new PermanentProcessingException("No handler for message type: " + itemType));
         }
         return handler.handle(inboxItem);
     }
@@ -47,7 +48,7 @@ public class WorkflowHandlerRegistry {
             case "Inquire_number", "Inquire_number_response" -> "NUMBER_INQUIRY";
             case "Down_system", "Up_system" -> "MAINTENANCE";
             case "DB_synch_request", "DB_synch_response" -> "DATA_SYNCHRONIZATION";
-            default -> "PORTING";
+            default -> null;
         };
     }
 }

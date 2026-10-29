@@ -30,6 +30,7 @@ class TimerServiceTest {
     private static TimerService timerService;
     private static WorkflowEngine workflowEngine;
     private static TimerActionDispatcher dispatcher;
+    private static TimerProcessor processor;
 
     @BeforeAll
     static void setUpClass(Vertx vertx, VertxTestContext ctx) {
@@ -50,6 +51,7 @@ class TimerServiceTest {
                 timerService = new TimerService(p);
                 workflowEngine = new WorkflowEngine(p);
                 dispatcher = new TimerActionDispatcher(timerService, workflowEngine);
+                processor = new TimerProcessor(pool, dispatcher::dispatch);
                 ctx.completeNow();
             }));
     }
@@ -107,7 +109,7 @@ class TimerServiceTest {
             .compose(wfId -> timerService.createTimer(wfId, null, "T1", "KD_CHECK",
                 LocalDateTime.now(ZoneOffset.UTC).minusMinutes(1), new JsonObject()))
             .compose(id -> timerService.claimDueTimers("worker-1", 10, 60)
-                .compose(rows -> dispatcher.dispatch(rows.iterator().next()))
+                .compose(rows -> processor.fireOne(rows.iterator().next()))
                 .compose(v -> sqlClient.preparedQuery("SELECT status FROM np_timers WHERE id = ?")
                     .execute(Tuple.of(id)))
                 .compose(rows -> {
@@ -115,7 +117,7 @@ class TimerServiceTest {
                     // Second dispatch of the same row must no-op safely (recover path).
                     return sqlClient.preparedQuery("SELECT * FROM np_timers WHERE id = ?")
                         .execute(Tuple.of(id))
-                        .compose(fresh -> dispatcher.dispatch(fresh.iterator().next()))
+                        .compose(fresh -> processor.fireOne(fresh.iterator().next()))
                         .compose(v -> sqlClient.preparedQuery("SELECT status FROM np_timers WHERE id = ?")
                             .execute(Tuple.of(id)))
                         .compose(r2 -> {
