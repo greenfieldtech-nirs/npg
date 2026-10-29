@@ -138,6 +138,39 @@ class SecurityConfigTest {
     }
 
     @Test
+    void floodCannotEvictLockedKeys() {
+        LoginThrottle throttle = new LoginThrottle(2, Duration.ofMinutes(5), new MutableClock(), 10);
+        assertTrue(throttle.tryAcquire("victim"));
+        assertTrue(throttle.tryAcquire("victim"));
+        assertFalse(throttle.tryAcquire("victim"));
+        for (int i = 0; i < 1_000; i++) {
+            throttle.tryAcquire("spray-" + i);
+        }
+        assertFalse(throttle.tryAcquire("victim"), "a locked key must survive a key flood");
+    }
+
+    @Test
+    void saturatedTableOfLockedKeysFailsClosedForNewKeys() {
+        LoginThrottle throttle = new LoginThrottle(1, Duration.ofMinutes(5), new MutableClock(), 3);
+        for (String k : new String[]{"a", "b", "c"}) {
+            assertTrue(throttle.tryAcquire(k));
+        }
+        assertFalse(throttle.tryAcquire("d"));
+        assertEquals(3, throttle.trackedKeys());
+    }
+
+    @Test
+    void knownLoginSourcesExpire() {
+        MutableClock clock = new MutableClock();
+        KnownLoginSources known = new KnownLoginSources(Duration.ofHours(24), clock, 10);
+        known.remember("id:1", "10.0.0.1");
+        assertTrue(known.isKnown("id:1", "10.0.0.1"));
+        assertFalse(known.isKnown("id:1", "10.0.0.2"));
+        clock.advance(Duration.ofHours(25));
+        assertFalse(known.isKnown("id:1", "10.0.0.1"));
+    }
+
+    @Test
     void ackXmlEscapesPeerControlledFields() {
         TechnicalAck nack = TechnicalAck.nack("</CorrelationId><Status>ACK</Status>", "tx&<1>",
             new NackReason("NACK_X", null, "bad <input>", "TRANSPORT", false));

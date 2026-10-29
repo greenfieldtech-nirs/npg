@@ -831,7 +831,8 @@ class ManagementApiTest {
 
     @Test
     void throttleCannotBeBypassedWithCaseOrWhitespaceVariants(VertxTestContext ctx) {
-        String[] variants = {"Sprayed", "SPRAYED", "sprayed ", " sprayed", "sPrAyEd"};
+        // all resolve to the same account under utf8mb4_unicode_ci (case, trailing space, accents)
+        String[] variants = {"Sprayed", "SPRAYED", "sprayed ", "spräyed", "SPRÄYED"};
         Future<Integer> chain = seedUser("sprayed", "correct-password", "USER").map(0);
         for (String variant : variants) {
             chain = chain.compose(x -> webClient.post("/api/auth/login")
@@ -842,6 +843,32 @@ class ManagementApiTest {
                 .sendJsonObject(new JsonObject().put("username", "sprayed").put("password", "correct-password")))
             .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
                 assertEquals(429, resp.statusCode(), resp.bodyAsString());
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void sprayingAnAccountDoesNotLockOutItsKnownOwner(VertxTestContext ctx) {
+        AuthApiHandler handler = new AuthApiHandler(vertx, pool, JwtService.fromEnvironment(),
+            new cloud.cloudonix.npg.security.LoginThrottle(5, Duration.ofMinutes(5), java.time.Clock.systemUTC()),
+            new cloud.cloudonix.npg.security.LoginThrottle(3, Duration.ofMinutes(15), java.time.Clock.systemUTC()),
+            new cloud.cloudonix.npg.security.KnownLoginSources(Duration.ofHours(24), java.time.Clock.systemUTC(), 100));
+        JsonObject good = new JsonObject().put("username", "owner").put("password", "owner-password");
+        JsonObject bad = new JsonObject().put("username", "owner").put("password", "guess");
+        seedUser("owner", "owner-password", "USER")
+            .compose(v -> handler.login(good, "10.0.0.1"))                       // owner's usual source
+            .compose(v -> handler.login(bad, "10.0.0.2").recover(e -> Future.succeededFuture()))
+            .compose(v -> handler.login(bad, "10.0.0.3").recover(e -> Future.succeededFuture()))
+            .compose(v -> handler.login(bad, "10.0.0.4").recover(e -> Future.succeededFuture()))
+            .compose(v -> handler.login(good, "10.0.0.5")                       // account limit reached
+                .map(ok -> "unexpected success")
+                .recover(e -> Future.succeededFuture(((ApiError) e).status + "")))
+            .compose(status -> {
+                ctx.verify(() -> assertEquals("429", status));
+                return handler.login(good, "10.0.0.1");                          // known source still works
+            })
+            .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
+                assertNotNull(resp.getString("token"));
                 ctx.completeNow();
             })));
     }

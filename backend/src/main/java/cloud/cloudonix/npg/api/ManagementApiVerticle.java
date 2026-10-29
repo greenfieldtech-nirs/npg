@@ -58,7 +58,7 @@ public class ManagementApiVerticle extends AbstractVerticle {
                 PubSubService pubSubService = new PubSubService(vertx, redisFuture.result());
                 JwtService jwt = JwtService.fromEnvironment();
                 guard = new JwtAuthHandler.Guard(jwt, new UserRepository(pool));
-                authApiHandler = new AuthApiHandler(pool, jwt);
+                authApiHandler = new AuthApiHandler(vertx, pool, jwt);
                 dashboardApiHandler = new DashboardApiHandler(pool);
                 workflowApiHandler = new WorkflowApiHandler(pool);
                 messageApiHandler = new MessageApiHandler(pool, xmlAuditService,
