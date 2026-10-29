@@ -95,7 +95,7 @@ public class MessageApiHandler {
         if (msg == null) {
             return Future.succeededFuture(null);
         }
-        String uuid = msg.getString("meessageUuid");
+        String uuid = msg.getString("messageUuid");
         if (uuid == null) {
             return Future.succeededFuture(msg);
         }
@@ -109,7 +109,7 @@ public class MessageApiHandler {
                     return Future.succeededFuture(msg);
                 }
                 JsonObject fields = catalogLoader.extractBody(parsed.document(),
-                    msg.getString("meessageType"), java.util.Map.of()).toJson();
+                    msg.getString("messageType"), java.util.Map.of()).toJson();
                 JsonObject enriched = msg.copy();
                 String phoneNumber = fields.getString("phoneNumber");
                 String donor = fields.getString("donor");

@@ -1,5 +1,6 @@
 package cloud.cloudonix.npg.timer;
 
+import cloud.cloudonix.npg.config.Env;
 import cloud.cloudonix.npg.config.DatabaseConfig;
 import cloud.cloudonix.npg.workflow.WorkflowEngine;
 import io.vertx.core.AbstractVerticle;
@@ -23,9 +24,9 @@ public class TimerWorkerVerticle extends AbstractVerticle {
                 WorkflowEngine workflowEngine = new WorkflowEngine(pool);
                 TimerActionDispatcher dispatcher = new TimerActionDispatcher(timerService, workflowEngine);
 
-                String workerId = System.getenv().getOrDefault("WORKER_ID", "timer-worker-" + System.currentTimeMillis());
-                int batchSize = Integer.parseInt(System.getenv().getOrDefault("QUEUE_CLAIM_BATCH_SIZE", "10"));
-                int lockSeconds = Integer.parseInt(System.getenv().getOrDefault("QUEUE_LOCK_SECONDS", "60"));
+                String workerId = Env.get("WORKER_ID", "timer-worker-" + System.currentTimeMillis());
+                int batchSize = Integer.parseInt(Env.get("QUEUE_CLAIM_BATCH_SIZE", "10"));
+                int lockSeconds = Integer.parseInt(Env.get("QUEUE_LOCK_SECONDS", "60"));
 
                 periodicTimerId = vertx.setPeriodic(5000, id -> claimAndProcess(timerService, dispatcher, workerId, batchSize, lockSeconds));
                 startPromise.complete();

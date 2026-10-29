@@ -1,5 +1,6 @@
 package cloud.cloudonix.npg.outbound;
 
+import cloud.cloudonix.npg.config.Env;
 import cloud.cloudonix.npg.audit.XmlAuditService;
 import cloud.cloudonix.npg.config.DatabaseConfig;
 import cloud.cloudonix.npg.config.MongoConfig;
@@ -38,9 +39,9 @@ public class OutboundDispatcherVerticle extends AbstractVerticle {
                 RetryScheduler retryScheduler = new RetryScheduler(pool);
                 TransportAdapter transportAdapter = new HttpXmlTransportAdapter(vertx);
 
-                String workerId = System.getenv().getOrDefault("WORKER_ID", "dispatcher-" + System.currentTimeMillis());
-                int batchSize = Integer.parseInt(System.getenv().getOrDefault("QUEUE_CLAIM_BATCH_SIZE", "10"));
-                int lockSeconds = Integer.parseInt(System.getenv().getOrDefault("QUEUE_LOCK_SECONDS", "60"));
+                String workerId = Env.get("WORKER_ID", "dispatcher-" + System.currentTimeMillis());
+                int batchSize = Integer.parseInt(Env.get("QUEUE_CLAIM_BATCH_SIZE", "10"));
+                int lockSeconds = Integer.parseInt(Env.get("QUEUE_LOCK_SECONDS", "60"));
 
                 periodicTimerId = vertx.setPeriodic(2000, id -> claimAndSend(pool, outboxRepository, xmlAuditService,
                     retryPolicyService, retryScheduler, transportAdapter, workerId, batchSize, lockSeconds));
