@@ -21,6 +21,7 @@ docker run --rm \
   --network npg_dev \
   -v "$(pwd)/backend:/workspace" \
   -v "$(pwd)/docs:/docs:ro" \
+  -v npg-m2-cache:/root/.m2 \
   -w /workspace \
   -e DB_HOST=npg-db \
   -e DB_PORT=3306 \
@@ -31,4 +32,4 @@ docker run --rm \
   -e MONGO_DB=npg \
   -e REDIS_URI=redis://npg-redis:6379 \
   eclipse-temurin:21-jdk-alpine \
-  sh -c "apk add --no-cache maven && mvn test"
+  sh -c "apk add --no-cache maven >/dev/null && mvn -B -q test ${MVN_ARGS:-}"
