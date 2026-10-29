@@ -265,8 +265,10 @@ class TraceSimulationTest {
         service.receive(f.xml(), TRANSPORT, headers)
             .compose(ack -> {
                 assertEquals(TechnicalAckStatus.ACK, ack.status());
-                return pool.query("SELECT * FROM np_inbox ORDER BY id DESC LIMIT 1").execute();
+                // the trace's receiver BZ is this gateway
+                return pool.query("UPDATE np_operators SET is_local = (operator_code = 'BZ')").execute();
             })
+            .compose(v -> pool.query("SELECT * FROM np_inbox ORDER BY id DESC LIMIT 1").execute())
             .compose(rows -> {
                 Row inboxRow = rows.iterator().next();
                 return pool.withTransaction(tx -> registry.handle(tx, inboxRow));
@@ -279,7 +281,8 @@ class TraceSimulationTest {
                 Row wf = rows.iterator().next();
                 // the trace's HL asks BZ: as the receiver we are the donor
                 assertEquals("DONOR", wf.getString("local_role"));
-                assertEquals("CHECK_RECEIVED", wf.getString("current_state"));
+                // dev/test policy auto-approves the eligibility check
+                assertEquals("CHECK_APPROVED", wf.getString("current_state"));
                 assertEquals("08XXXXXXX", wf.getString("phone_number"));
                 assertEquals("FIXED", new io.vertx.core.json.JsonObject(wf.getValue("context_json").toString())
                     .getString("numberType"), "networkType=F in the trace");

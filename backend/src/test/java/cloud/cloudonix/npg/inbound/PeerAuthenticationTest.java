@@ -71,8 +71,7 @@ class PeerAuthenticationTest {
     /** LOC is this gateway; PEER has an endpoint whose credential each test sets. */
     @BeforeEach
     void operators(VertxTestContext ctx) {
-        pool.query("DELETE FROM np_inbox").execute()
-            .compose(v -> pool.query("DELETE FROM np_messages").execute())
+        TestDatabase.clean(pool)
             .compose(v -> pool.query("DELETE FROM np_operator_endpoints").execute())
             .compose(v -> pool.query("DELETE FROM np_operators WHERE operator_code IN ('LOC', 'PEER', 'STRANGER', 'OTHER')").execute())
             .compose(v -> pool.query("INSERT INTO np_operators (operator_code, operator_name, is_local) VALUES ('LOC', 'Us', TRUE)").execute())

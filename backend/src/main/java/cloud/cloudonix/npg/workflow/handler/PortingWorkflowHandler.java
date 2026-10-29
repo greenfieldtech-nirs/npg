@@ -1,46 +1,41 @@
 package cloud.cloudonix.npg.workflow.handler;
 
 import cloud.cloudonix.npg.workflow.InboundMessage;
-import cloud.cloudonix.npg.workflow.StateMachines;
-import cloud.cloudonix.npg.workflow.WorkflowEngine;
+import cloud.cloudonix.npg.workflow.PublicationTracker;
+import cloud.cloudonix.npg.workflow.Workflow;
 import cloud.cloudonix.npg.workflow.WorkflowServices;
+import cloud.cloudonix.npg.workflow.porting.PortingService;
+import cloud.cloudonix.npg.workflow.porting.PortingSteps;
 import io.vertx.core.Future;
 import io.vertx.core.json.JsonObject;
 import io.vertx.sqlclient.Row;
 import io.vertx.sqlclient.SqlConnection;
 
-/** Porting messages. */
+/** Routes porting messages and timers to {@link PortingService}. */
 public class PortingWorkflowHandler implements WorkflowHandler {
 
     private final WorkflowServices services;
+    private final PortingSteps steps;
 
-    public PortingWorkflowHandler(WorkflowServices services) {
+    public PortingWorkflowHandler(WorkflowServices services, PortingService porting) {
         this.services = services;
+        this.steps = new PortingSteps(porting);
     }
 
     @Override
     public Future<Void> handle(SqlConnection tx, Row inboxItem) {
         return InboundMessage.load(tx, services.xmlAudit(), services.catalog(), inboxItem)
-            .compose(message -> switch (message.messageType()) {
-                case "Check" -> onCheck(tx, message);
-                default -> Future.succeededFuture();
-            });
+            .compose(message -> steps.onMessage(tx, message));
     }
 
-    /** A recipient asks whether one of our numbers may port out: we are the donor. */
-    private Future<Void> onCheck(SqlConnection tx, InboundMessage message) {
-        String phone = message.body().getString("phoneNumber");
-        String numberType = switch (message.body().getString("networkType", "")) {
-            case "F" -> "FIXED";
-            case "M" -> "MOBILE";
-            default -> "UNKNOWN";
-        };
-        return services.engine().findForUpdate(tx, message.requestId(), StateMachines.PORTING, StateMachines.DONOR)
-            .compose(existing -> existing != null
-                ? Future.<Void>succeededFuture()
-                : services.engine().create(tx, new WorkflowEngine.NewWorkflow(StateMachines.PORTING, StateMachines.DONOR,
-                        message.requestId(), phone, message.senderOperatorId(), message.receiverOperatorId(), null, null,
-                        new JsonObject().put("numberType", numberType).put("checkTrxNo", message.trxNo()), null), "system")
-                    .mapEmpty());
+    @Override
+    public Future<Boolean> onTimer(SqlConnection tx, Workflow workflow, Row timer) {
+        Object raw = timer.getValue("action_json");
+        JsonObject action = raw == null ? new JsonObject() : raw instanceof JsonObject jo ? jo : new JsonObject(raw.toString());
+        return steps.onTimer(tx, workflow, timer.getString("timer_name"), action.getString("action"));
+    }
+
+    PublicationTracker publication() {
+        return steps.publication();
     }
 }

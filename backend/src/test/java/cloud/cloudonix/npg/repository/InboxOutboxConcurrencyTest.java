@@ -83,7 +83,7 @@ class InboxOutboxConcurrencyTest {
             inserts.add(messageRepository.insertMessage(
                 UUID.randomUUID().toString(), "Check", "INBOUND", null, null,
                 "REQ-" + idx, "TX-" + idx, null, "key-" + idx, null, null, "4.0"
-            ).compose(msgId -> inboxRepository.createInboxItem(msgId, null, "CHECK", LocalDateTime.now(ZoneOffset.UTC), 100, 3)));
+            ).compose(msgId -> inboxRepository.createInboxItem(msgId, null, "CHECK", null, 100, 3)));
         }
 
         CompositeFuture.all(inserts)
@@ -110,7 +110,7 @@ class InboxOutboxConcurrencyTest {
             inserts.add(messageRepository.insertMessage(
                 UUID.randomUUID().toString(), "Check", "OUTBOUND", null, null,
                 "REQ-" + idx, "TX-" + idx, null, "out-key-" + idx, null, null, "4.0"
-            ).compose(msgId -> outboxRepository.createOutboxItem(msgId, null, 1L, "CHECK", LocalDateTime.now(ZoneOffset.UTC), 100, 3)));
+            ).compose(msgId -> outboxRepository.createOutboxItem(msgId, null, 1L, "CHECK", null, 100, 3)));
         }
 
         CompositeFuture.all(inserts)

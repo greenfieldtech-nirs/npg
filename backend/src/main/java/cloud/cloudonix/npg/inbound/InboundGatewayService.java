@@ -133,7 +133,7 @@ public class InboundGatewayService {
                                 header.correlationId(), idempotencyKey, mongoDocId,
                                 XmlAuditService.sha256(rawXml), header.protocolVersion()))
                         .compose(messageId -> txInboxRepo.createInboxItem(messageId, null,
-                                header.messageType(), LocalDateTime.now(ZoneOffset.UTC), 100, 5)
+                                header.messageType(), null, 100, 5)
                             .map(inboxId -> AckNackBuilder.ack(header))));
                 });
         });

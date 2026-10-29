@@ -5,6 +5,8 @@ import cloud.cloudonix.npg.worker.PermanentProcessingException;
 import cloud.cloudonix.npg.workflow.StateMachines;
 import cloud.cloudonix.npg.workflow.Workflow;
 import cloud.cloudonix.npg.workflow.WorkflowServices;
+import cloud.cloudonix.npg.workflow.porting.PortOutPolicy;
+import cloud.cloudonix.npg.workflow.porting.PortingService;
 import io.vertx.core.Future;
 import io.vertx.core.json.JsonObject;
 import io.vertx.sqlclient.Row;
@@ -21,8 +23,10 @@ public class WorkflowHandlerRegistry {
 
     public WorkflowHandlerRegistry(WorkflowServices services) {
         this.services = services;
-        handlers.put(StateMachines.PORTING, new PortingWorkflowHandler(services));
-        handlers.put(StateMachines.PUBLICATION, new PublicationWorkflowHandler());
+        PortingWorkflowHandler porting = new PortingWorkflowHandler(services,
+            new PortingService(services, PortOutPolicy.fromEnvironment()));
+        handlers.put(StateMachines.PORTING, porting);
+        handlers.put(StateMachines.PUBLICATION, new PublicationWorkflowHandler(services, porting.publication()));
         handlers.put(StateMachines.NUMBER_RETURN, new NumberReturnWorkflowHandler());
         handlers.put(StateMachines.NUMBER_INQUIRY, new InquiryWorkflowHandler());
         handlers.put(StateMachines.MAINTENANCE, new MaintenanceWorkflowHandler());

@@ -12,8 +12,6 @@ import io.vertx.core.json.JsonObject;
 import io.vertx.sqlclient.Pool;
 import io.vertx.sqlclient.SqlClient;
 
-import java.time.LocalDateTime;
-import java.time.ZoneOffset;
 import java.util.UUID;
 
 /**
@@ -69,19 +67,24 @@ public class OutboundMessageService {
         });
     }
 
+    /** Ids of a queued outbound message. */
+    public record Queued(long messageId, long outboxId) {
+    }
+
     /** Inserts the message and outbox rows; call inside the transaction that decided to send. */
-    public Future<Long> enqueue(SqlClient tx, Prepared p) {
+    public Future<Queued> enqueue(SqlClient tx, Prepared p) {
         String idempotencyKey = String.join("|", "OUTBOUND", p.from().operatorCode(), p.to().operatorCode(),
             p.messageType(), p.requestId(), p.trxNo());
         return new MessageRepository(tx).insertMessage(p.messageUuid(), p.workflowId(), p.messageType(), "OUTBOUND",
                 p.from().id(), p.to().id(), p.requestId(), p.trxNo(), p.correlationTrxNo(), idempotencyKey,
                 p.mongoDocumentId(), p.xmlSha256(), versionNo)
             .compose(messageId -> new OutboxRepository(tx).createOutboxItem(messageId, p.workflowId(), p.to().id(),
-                p.messageType(), LocalDateTime.now(ZoneOffset.UTC), 100, 5));
+                    p.messageType(), null, 100, 5)
+                .map(outboxId -> new Queued(messageId, outboxId)));
     }
 
     /** Prepare and enqueue in one go, for callers with no surrounding transaction. */
-    public Future<Long> send(Pool pool, Long workflowId, String messageType, String processType, Operator from,
+    public Future<Queued> send(Pool pool, Long workflowId, String messageType, String processType, Operator from,
                              Operator to, String requestId, String correlationTrxNo, JsonObject body) {
         return prepare(pool, workflowId, messageType, processType, from, to, requestId, correlationTrxNo, body)
             .compose(prepared -> pool.withTransaction(tx -> enqueue(tx, prepared)));

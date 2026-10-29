@@ -83,7 +83,7 @@ class TimerServiceTest {
     }
 
     private Future<Long> createWorkflow() {
-        return pool.withTransaction(tx -> workflowEngine.create(tx, new WorkflowEngine.NewWorkflow("PORTING", "RECIPIENT",
+        return pool.withTransaction(tx -> workflowEngine.create(tx, new WorkflowEngine.NewWorkflow("PORTING", "RECIPIENT", null,
                 "req-timer-" + java.util.UUID.randomUUID(), "0501234567", 1L, 2L, null, null, null, null), "test"))
             .map(cloud.cloudonix.npg.workflow.Workflow::id);
     }

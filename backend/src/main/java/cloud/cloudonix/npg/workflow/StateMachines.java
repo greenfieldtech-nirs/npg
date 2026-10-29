@@ -127,7 +127,7 @@ public final class StateMachines {
         register(new Machine(PORTING, DONOR, "CHECK_RECEIVED")
             .edge("CHECK_RECEIVED", "CHECK_APPROVED", "CHECK_REJECTED")
             .edge("CHECK_APPROVED", "REQUEST_RECEIVED", "CANCELLED")
-            .edge("REQUEST_RECEIVED", "PORT_SCHEDULED", "REQUEST_REJECTED")
+            .edge("REQUEST_RECEIVED", "PORT_SCHEDULED", "REQUEST_REJECTED", "CANCELLED")
             .edge("PORT_SCHEDULED", "CANCELLED", "COMPLETED")
             .terminal("CHECK_REJECTED", "REQUEST_REJECTED", "CANCELLED", "COMPLETED"));
 
