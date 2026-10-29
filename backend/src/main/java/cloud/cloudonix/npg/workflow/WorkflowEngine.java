@@ -25,7 +25,11 @@ public class WorkflowEngine {
         "current_operator_id", "original_operator_id", "recipient_operator_id", "donor_operator_id",
         "failure_code", "failure_reason");
 
-    public record NewWorkflow(String type, String role, String requestId, String phoneNumber,
+    /**
+     * @param counterpartyOperatorId the peer this process is conducted with (who started it, or whom
+     *                               we started it with); part of the workflow's identity
+     */
+    public record NewWorkflow(String type, String role, Long counterpartyOperatorId, String requestId, String phoneNumber,
                               Long recipientOperatorId, Long donorOperatorId, Long originalOperatorId,
                               LocalDateTime requestedPortTime, JsonObject context, String customerBatchId) {
     }
@@ -35,13 +39,14 @@ public class WorkflowEngine {
         StateMachines.Machine machine = StateMachines.of(spec.type(), spec.role());
         String uuid = UUID.randomUUID().toString();
         return tx.preparedQuery("""
-                INSERT INTO np_workflows (workflow_uuid, workflow_type, local_role, request_id, phone_number,
-                                          customer_batch_id, recipient_operator_id, donor_operator_id,
+                INSERT INTO np_workflows (workflow_uuid, workflow_type, local_role, counterparty_operator_id, request_id,
+                                          phone_number, customer_batch_id, recipient_operator_id, donor_operator_id,
                                           original_operator_id, requested_port_time, current_state,
                                           context_json, created_by)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """)
-            .execute(Tuple.from(new Object[]{uuid, spec.type(), spec.role(), spec.requestId(), spec.phoneNumber(),
+            .execute(Tuple.from(new Object[]{uuid, spec.type(), spec.role(), spec.counterpartyOperatorId(),
+                spec.requestId(), spec.phoneNumber(),
                 spec.customerBatchId(), spec.recipientOperatorId(), spec.donorOperatorId(), spec.originalOperatorId(),
                 spec.requestedPortTime(), machine.initial(),
                 (spec.context() != null ? spec.context() : new JsonObject()).encode(), actor}))
@@ -70,13 +75,18 @@ public class WorkflowEngine {
                 : Future.failedFuture(new WorkflowNotFoundException("Workflow " + workflowUuid + " not found")));
     }
 
-    /** The workflow of this type/role for a protocol REQUEST_ID, locked; null when there is none. */
-    public Future<Workflow> findForUpdate(SqlClient tx, String requestId, String type, String role) {
+    /**
+     * The workflow of this type/role for a protocol REQUEST_ID conducted with {@code counterpartyId},
+     * locked; null when there is none. A REQUEST_ID never identifies a workflow on its own: it is
+     * chosen by a peer, so another peer must not be able to reach the process by reusing it.
+     */
+    public Future<Workflow> findForUpdate(SqlClient tx, String requestId, String type, String role, Long counterpartyId) {
         return tx.preparedQuery("""
-                SELECT * FROM np_workflows WHERE request_id = ? AND workflow_type = ? AND local_role = ?
+                SELECT * FROM np_workflows
+                WHERE request_id = ? AND workflow_type = ? AND local_role = ? AND counterparty_operator_id <=> ?
                 ORDER BY id DESC LIMIT 1 FOR UPDATE
                 """)
-            .execute(Tuple.of(requestId, type, role))
+            .execute(Tuple.of(requestId, type, role, counterpartyId))
             .map(rows -> rows.iterator().hasNext() ? Workflow.from(rows.iterator().next()) : null);
     }
 
@@ -144,7 +154,8 @@ public class WorkflowEngine {
         JsonObject merged = wf.context().copy().mergeIn(values);
         return tx.preparedQuery("UPDATE np_workflows SET context_json = ?, updated_at = UTC_TIMESTAMP(6) WHERE id = ?")
             .execute(Tuple.of(merged.encode(), wf.id()))
-            .map(rs -> new Workflow(wf.id(), wf.uuid(), wf.type(), wf.role(), wf.requestId(), wf.phoneNumber(),
+            .map(rs -> new Workflow(wf.id(), wf.uuid(), wf.type(), wf.role(), wf.counterpartyOperatorId(),
+                wf.requestId(), wf.phoneNumber(),
                 wf.state(), wf.recipientOperatorId(), wf.donorOperatorId(), wf.originalOperatorId(),
                 wf.requestedPortTime(), wf.approvedPortTime(), merged));
     }

@@ -260,7 +260,7 @@ class WorkflowEngineTest {
     }
 
     private static WorkflowEngine.NewWorkflow spec(String requestId, String type, String role) {
-        return new WorkflowEngine.NewWorkflow(type, role, requestId, "0501234567", null, null, null, null,
+        return new WorkflowEngine.NewWorkflow(type, role, null, requestId, "0501234567", null, null, null, null,
             new JsonObject().put("numberType", "FIXED"), null);
     }
 }

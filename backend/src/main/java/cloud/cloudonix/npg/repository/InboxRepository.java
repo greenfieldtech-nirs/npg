@@ -28,12 +28,13 @@ public class InboxRepository {
         this.sqlClient = sqlClient;
     }
 
+    /** {@code dueAt} null means due now by the database clock (claims compare against that clock). */
     public Future<Long> createInboxItem(Long messageId, Long workflowId, String itemType,
                                         LocalDateTime dueAt, int priority, int maxAttempts) {
         String inboxUuid = UUID.randomUUID().toString();
         return sqlClient.preparedQuery("""
                 INSERT INTO np_inbox (inbox_uuid, message_id, workflow_id, item_type, due_at, priority, max_attempts)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, COALESCE(?, UTC_TIMESTAMP(6)), ?, ?)
                 """)
             .execute(Tuple.of(inboxUuid, messageId, workflowId, itemType, dueAt, priority, maxAttempts))
             .map(rs -> rs.property(MySQLClient.LAST_INSERTED_ID));

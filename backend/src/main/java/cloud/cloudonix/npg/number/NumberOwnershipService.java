@@ -4,6 +4,7 @@ import io.vertx.core.Future;
 import io.vertx.sqlclient.Pool;
 import io.vertx.sqlclient.Row;
 import io.vertx.sqlclient.RowSet;
+import io.vertx.sqlclient.SqlClient;
 import io.vertx.sqlclient.Tuple;
 
 import java.time.LocalDateTime;
@@ -26,30 +27,44 @@ public class NumberOwnershipService {
     public Future<Void> updateCurrentOperator(String phoneNumber, Long newOperatorId,
                                                String changeReason, Long workflowId, Long messageId,
                                                String numberType) {
+        return pool.withTransaction(tx -> transfer(tx, phoneNumber, numberType, newOperatorId, "PORTED",
+            changeReason, workflowId, messageId));
+    }
+
+    /**
+     * Records that {@code phoneNumber} is now served by {@code newOperatorId}, inside the caller's
+     * transaction, with an ownership-history row. The first operator ever recorded for a number
+     * that was unknown becomes its original operator only if the caller says so via
+     * {@code originalIfUnknown}; otherwise the previous owner is kept as previous_operator_id.
+     */
+    public static Future<Void> transfer(SqlClient tx, String phoneNumber, String numberType, Long newOperatorId,
+                                        String status, String changeReason, Long workflowId, Long messageId) {
+        return transfer(tx, phoneNumber, numberType, newOperatorId, null, status, changeReason, workflowId, messageId);
+    }
+
+    public static Future<Void> transfer(SqlClient tx, String phoneNumber, String numberType, Long newOperatorId,
+                                        Long originalIfUnknown, String status, String changeReason,
+                                        Long workflowId, Long messageId) {
         AtomicReference<Long> previousOperatorId = new AtomicReference<>();
-        return pool.withTransaction(tx -> tx.preparedQuery(
-                    "SELECT id, current_operator_id FROM np_numbers WHERE phone_number = ?")
+        String timestampColumn = "RETURNED".equals(status) ? "last_returned_at" : "last_ported_at";
+        return tx.preparedQuery("SELECT id, current_operator_id FROM np_numbers WHERE phone_number = ? FOR UPDATE")
             .execute(Tuple.of(phoneNumber))
             .compose(rows -> {
                 if (rows.iterator().hasNext()) {
                     Row row = rows.iterator().next();
-                    Long numberId = row.getLong("id");
                     previousOperatorId.set(row.getLong("current_operator_id"));
-                    return tx.preparedQuery("""
-                            UPDATE np_numbers SET previous_operator_id = current_operator_id,
-                                                  current_operator_id = ?, status = 'PORTED',
-                                                  last_ported_at = UTC_TIMESTAMP(6), updated_at = UTC_TIMESTAMP(6)
-                            WHERE id = ?
-                            """)
-                        .execute(Tuple.of(newOperatorId, numberId))
+                    return tx.preparedQuery("UPDATE np_numbers SET previous_operator_id = current_operator_id, "
+                            + "current_operator_id = ?, status = ?, " + timestampColumn + " = UTC_TIMESTAMP(6), "
+                            + "source_message_id = ?, updated_at = UTC_TIMESTAMP(6) WHERE id = ?")
+                        .execute(Tuple.of(newOperatorId, status, messageId, row.getLong("id")))
                         .mapEmpty();
                 }
-                previousOperatorId.set(null);
-                return tx.preparedQuery("""
-                        INSERT INTO np_numbers (phone_number, number_type, current_operator_id, status)
-                        VALUES (?, ?, ?, 'PORTED')
-                        """)
-                    .execute(Tuple.of(phoneNumber, numberType, newOperatorId))
+                previousOperatorId.set(originalIfUnknown);
+                return tx.preparedQuery("INSERT INTO np_numbers (phone_number, number_type, original_operator_id, "
+                        + "previous_operator_id, current_operator_id, status, " + timestampColumn + ", source_message_id) "
+                        + "VALUES (?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6), ?)")
+                    .execute(Tuple.from(new Object[]{phoneNumber, numberType != null ? numberType : "UNKNOWN",
+                        originalIfUnknown, originalIfUnknown, newOperatorId, status, messageId}))
                     .mapEmpty();
             })
             .compose(v -> tx.preparedQuery("""
@@ -59,7 +74,14 @@ public class NumberOwnershipService {
                     """)
                 .execute(Tuple.of(phoneNumber, previousOperatorId.get(), newOperatorId, changeReason,
                     workflowId, messageId, LocalDateTime.now(ZoneOffset.UTC)))
-                .mapEmpty()));
+                .mapEmpty());
+    }
+
+    /** Current owner of a number, or null when this gateway has never recorded it. */
+    public static Future<Long> currentOperatorId(SqlClient tx, String phoneNumber) {
+        return tx.preparedQuery("SELECT current_operator_id FROM np_numbers WHERE phone_number = ?")
+            .execute(Tuple.of(phoneNumber))
+            .map(rows -> rows.iterator().hasNext() ? rows.iterator().next().getLong("current_operator_id") : null);
     }
 
     public Future<RowSet<Row>> findCurrentOperator(String phoneNumber) {

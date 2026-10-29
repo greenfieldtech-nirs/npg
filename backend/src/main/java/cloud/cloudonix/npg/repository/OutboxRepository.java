@@ -31,12 +31,13 @@ public class OutboxRepository {
         this.sqlClient = sqlClient;
     }
 
+    /** {@code dueAt} null means due now by the database clock (claims compare against that clock). */
     public Future<Long> createOutboxItem(Long messageId, Long workflowId, Long destinationOperatorId,
                                           String itemType, LocalDateTime dueAt, int priority, int maxAttempts) {
         String outboxUuid = UUID.randomUUID().toString();
         return sqlClient.preparedQuery("""
                 INSERT INTO np_outbox (outbox_uuid, message_id, workflow_id, destination_operator_id, item_type, due_at, priority, max_attempts)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, COALESCE(?, UTC_TIMESTAMP(6)), ?, ?)
                 """)
             .execute(Tuple.of(outboxUuid, messageId, workflowId, destinationOperatorId, itemType, dueAt, priority, maxAttempts))
             .map(rs -> rs.property(MySQLClient.LAST_INSERTED_ID));
