@@ -4,6 +4,7 @@ import cloud.cloudonix.npg.acknack.TechnicalAck;
 import cloud.cloudonix.npg.acknack.TechnicalAckStatus;
 import cloud.cloudonix.npg.audit.XmlTransportMetadata;
 import cloud.cloudonix.npg.config.DatabaseConfig;
+import cloud.cloudonix.npg.config.Env;
 import cloud.cloudonix.npg.config.MongoConfig;
 import cloud.cloudonix.npg.protocol.ProtocolCatalogLoader;
 import cloud.cloudonix.npg.security.ClientAddress;
@@ -26,6 +27,7 @@ public class InboundGatewayVerticle extends AbstractVerticle {
 
     private HttpServer server;
     private final ClientAddress clientAddress = ClientAddress.fromEnvironment();
+    private final boolean trustProxyClientCert = Env.getBoolean("INBOUND_TRUST_PROXY_CLIENT_CERT", false);
 
     @Override
     public void start(Promise<Void> startPromise) {
@@ -107,10 +109,13 @@ public class InboundGatewayVerticle extends AbstractVerticle {
 
     /**
      * Subject DN of the peer's client certificate, as verified by our TLS-terminating NGINX
-     * ({@code ssl_verify_client}). Believed only from a trusted proxy; anyone else could forge it.
+     * ({@code ssl_verify_client}). Only read when INBOUND_TRUST_PROXY_CLIENT_CERT=true — set it once
+     * the proxy verifies client certificates and overwrites these headers on every request (see
+     * nginx/*.conf) — and only from a trusted proxy. Otherwise the headers are client-forgeable and
+     * certificate-subject credentials can never be satisfied.
      */
     private String verifiedClientSubject(RoutingContext ctx) {
-        if (!clientAddress.fromTrustedProxy(ctx.request())) {
+        if (!trustProxyClientCert || !clientAddress.fromTrustedProxy(ctx.request())) {
             return null;
         }
         if (!"SUCCESS".equals(ctx.request().getHeader("X-SSL-Client-Verify"))) {
