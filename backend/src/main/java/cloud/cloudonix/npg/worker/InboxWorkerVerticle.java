@@ -1,5 +1,6 @@
 package cloud.cloudonix.npg.worker;
 
+import cloud.cloudonix.npg.config.Env;
 import cloud.cloudonix.npg.audit.XmlAuditService;
 import cloud.cloudonix.npg.config.DatabaseConfig;
 import cloud.cloudonix.npg.config.MongoConfig;
@@ -25,7 +26,7 @@ public class InboxWorkerVerticle extends AbstractVerticle {
 
     @Override
     public void start(Promise<Void> startPromise) {
-        String catalogPath = System.getenv().getOrDefault("CATALOG_PATH", "docs/protocol");
+        String catalogPath = Env.get("CATALOG_PATH", "docs/protocol");
 
         Future<Pool> poolFuture = DatabaseConfig.configure(vertx);
         Future<MongoClient> mongoFuture = MongoConfig.configure(vertx);
@@ -41,9 +42,9 @@ public class InboxWorkerVerticle extends AbstractVerticle {
                 InboxRepository inboxRepository = new InboxRepository(pool);
                 WorkflowHandlerRegistry registry = new WorkflowHandlerRegistry(pool, xmlAuditService,
                     catalogLoader, workflowEngine, ownershipService);
-                String workerId = System.getenv().getOrDefault("WORKER_ID", "worker-" + System.currentTimeMillis());
-                int batchSize = Integer.parseInt(System.getenv().getOrDefault("QUEUE_CLAIM_BATCH_SIZE", "10"));
-                int lockSeconds = Integer.parseInt(System.getenv().getOrDefault("QUEUE_LOCK_SECONDS", "60"));
+                String workerId = Env.get("WORKER_ID", "worker-" + System.currentTimeMillis());
+                int batchSize = Integer.parseInt(Env.get("QUEUE_CLAIM_BATCH_SIZE", "10"));
+                int lockSeconds = Integer.parseInt(Env.get("QUEUE_LOCK_SECONDS", "60"));
 
                 periodicTimerId = vertx.setPeriodic(2000, id -> claimAndProcess(inboxRepository, registry, workerId, batchSize, lockSeconds));
                 startPromise.complete();

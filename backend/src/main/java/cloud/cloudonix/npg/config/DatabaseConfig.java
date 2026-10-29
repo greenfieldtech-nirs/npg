@@ -10,20 +10,20 @@ import io.vertx.sqlclient.PoolOptions;
 public class DatabaseConfig {
 
     public static Future<Pool> configure(Vertx vertx) {
-        String host = getConfig("DB_HOST", "localhost");
+        String host = Env.get("DB_HOST", "localhost");
         int port;
         try {
-            port = Integer.parseInt(getConfig("DB_PORT", "3306"));
+            port = Integer.parseInt(Env.get("DB_PORT", "3306"));
         } catch (NumberFormatException e) {
             return Future.failedFuture("DB_PORT must be a valid integer");
         }
-        String database = getConfig("DB_NAME", "npg");
-        String user = getConfig("DB_USER", "npg");
-        String password = getConfig("DB_PASSWORD", "npg");
+        String database = Env.get("DB_NAME", "npg");
+        String user = Env.get("DB_USER", "npg");
+        String password = Env.get("DB_PASSWORD", "npg");
 
         int maxPoolSize;
         try {
-            maxPoolSize = Integer.parseInt(getConfig("DB_POOL_MAX_SIZE", "10"));
+            maxPoolSize = Integer.parseInt(Env.get("DB_POOL_MAX_SIZE", "10"));
         } catch (NumberFormatException e) {
             return Future.failedFuture("DB_POOL_MAX_SIZE must be a valid integer");
         }
@@ -57,14 +57,5 @@ public class DatabaseConfig {
                 }
                 return Future.succeededFuture(pool);
             });
-    }
-
-    private static String getConfig(String key, String defaultValue) {
-        String value = System.getProperty(key);
-        if (value != null && !value.isBlank()) {
-            return value;
-        }
-        value = System.getenv(key);
-        return value != null && !value.isBlank() ? value : defaultValue;
     }
 }

@@ -1,5 +1,6 @@
 package cloud.cloudonix.npg.service;
 
+import cloud.cloudonix.npg.config.Env;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonObject;
@@ -36,7 +37,7 @@ public class PubSubService {
             return Future.succeededFuture();
         }
         String uri = System.getProperty("REDIS_URI",
-            System.getenv().getOrDefault("REDIS_URI", "redis://localhost:6379"));
+            Env.get("REDIS_URI", "redis://localhost:6379"));
         RedisOptions options = new RedisOptions().setConnectionString(uri);
         return Redis.createClient(vertx, options)
             .connect()
