@@ -77,6 +77,30 @@ public class NumberOwnershipService {
                 .mapEmpty());
     }
 
+    /** Recorded ownership of a number, read under a row lock. */
+    public record Ownership(Long currentOperatorId, Long originalOperatorId, Long previousOperatorId) {
+    }
+
+    /**
+     * Locks and returns the number's recorded ownership, or null when it was never recorded. Every
+     * ownership decision must use this — never operator codes taken from a peer's message body.
+     */
+    public static Future<Ownership> lockOwnership(SqlClient tx, String phoneNumber) {
+        return tx.preparedQuery("""
+                SELECT current_operator_id, original_operator_id, previous_operator_id FROM np_numbers
+                WHERE phone_number = ? FOR UPDATE
+                """)
+            .execute(Tuple.of(phoneNumber))
+            .map(rows -> {
+                if (!rows.iterator().hasNext()) {
+                    return null;
+                }
+                Row row = rows.iterator().next();
+                return new Ownership(row.getLong("current_operator_id"), row.getLong("original_operator_id"),
+                    row.getLong("previous_operator_id"));
+            });
+    }
+
     /** Current owner of a number, or null when this gateway has never recorded it. */
     public static Future<Long> currentOperatorId(SqlClient tx, String phoneNumber) {
         return tx.preparedQuery("SELECT current_operator_id FROM np_numbers WHERE phone_number = ?")
