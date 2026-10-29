@@ -1,9 +1,10 @@
 package cloud.cloudonix.npg.timer;
 
+import cloud.cloudonix.npg.repository.QueueClaims;
 import io.vertx.core.Future;
 import io.vertx.core.json.JsonObject;
 import io.vertx.mysqlclient.MySQLClient;
-import io.vertx.sqlclient.Pool;
+import io.vertx.sqlclient.SqlClient;
 import io.vertx.sqlclient.Row;
 import io.vertx.sqlclient.RowSet;
 import io.vertx.sqlclient.Tuple;
@@ -14,9 +15,9 @@ import java.util.UUID;
 
 public class TimerService {
 
-    private final Pool pool;
+    private final SqlClient pool;
 
-    public TimerService(Pool pool) {
+    public TimerService(SqlClient pool) {
         this.pool = pool;
     }
 
@@ -32,43 +33,44 @@ public class TimerService {
             .map(rs -> rs.property(MySQLClient.LAST_INSERTED_ID));
     }
 
+    // a CLAIMED timer whose lock expired belongs to a crashed timer worker and may be reclaimed
+    private static final String CLAIMABLE = """
+        due_at <= UTC_TIMESTAMP(6)
+          AND (status = 'PENDING' OR (status = 'CLAIMED' AND locked_until < UTC_TIMESTAMP(6)))""";
+
+    /** Claims due timers; each returned row's {@code locked_by} is its claim token. */
     public Future<RowSet<Row>> claimDueTimers(String workerId, int batchSize, int lockSeconds) {
-        LocalDateTime lockUntil = LocalDateTime.now(ZoneOffset.UTC).plusSeconds(lockSeconds);
-        return pool.withTransaction(tx -> tx.preparedQuery("""
-                UPDATE np_timers
-                SET status = 'CLAIMED',
-                    locked_by = ?,
-                    locked_until = ?,
-                    updated_at = UTC_TIMESTAMP(6)
-                WHERE status = 'PENDING'
-                  AND due_at <= UTC_TIMESTAMP(6)
-                  AND (locked_until IS NULL OR locked_until < UTC_TIMESTAMP(6))
-                ORDER BY due_at ASC
-                LIMIT ?
-                """)
-            .execute(Tuple.of(workerId, lockUntil, batchSize))
-            .compose(u -> tx.preparedQuery("""
-                SELECT * FROM np_timers
-                WHERE locked_by = ? AND status = 'CLAIMED'
-                ORDER BY due_at ASC
-                """)
-                .execute(Tuple.of(workerId))));
+        return QueueClaims.claim(pool, "np_timers", CLAIMABLE, "due_at ASC, id ASC", workerId, batchSize, lockSeconds);
     }
 
-    public Future<RowSet<Row>> markFired(Long timerId) {
+    public Future<Boolean> markFired(Long timerId, String claimToken) {
         return pool.preparedQuery("""
                 UPDATE np_timers SET status = 'SUCCEEDED', fired_at = UTC_TIMESTAMP(6), attempts = attempts + 1,
-                                     updated_at = UTC_TIMESTAMP(6) WHERE id = ?
+                                     locked_by = NULL, locked_until = NULL, updated_at = UTC_TIMESTAMP(6)
+                WHERE id = ? AND locked_by = ?
                 """)
-            .execute(Tuple.of(timerId));
+            .execute(Tuple.of(timerId, claimToken))
+            .map(rs -> rs.rowCount() == 1);
     }
 
-    public Future<RowSet<Row>> markFailedRetryable(Long timerId, LocalDateTime nextDueAt) {
+    public Future<Boolean> markFailedRetryable(Long timerId, String claimToken, LocalDateTime nextDueAt) {
         return pool.preparedQuery("""
                 UPDATE np_timers SET status = 'PENDING', due_at = ?, attempts = attempts + 1,
-                                     updated_at = UTC_TIMESTAMP(6) WHERE id = ?
+                                     locked_by = NULL, locked_until = NULL, updated_at = UTC_TIMESTAMP(6)
+                WHERE id = ? AND locked_by = ?
                 """)
-            .execute(Tuple.of(nextDueAt, timerId));
+            .execute(Tuple.of(nextDueAt, timerId, claimToken))
+            .map(rs -> rs.rowCount() == 1);
+    }
+
+    public Future<Boolean> markFailedFinal(Long timerId, String claimToken) {
+        return pool.preparedQuery("""
+                UPDATE np_timers SET status = 'FAILED', attempts = attempts + 1,
+                                     locked_by = NULL, locked_until = NULL, updated_at = UTC_TIMESTAMP(6)
+                WHERE id = ? AND locked_by = ?
+                """)
+            .execute(Tuple.of(timerId, claimToken))
+            .map(rs -> rs.rowCount() == 1);
     }
 
     public Future<RowSet<Row>> cancelTimer(Long timerId) {

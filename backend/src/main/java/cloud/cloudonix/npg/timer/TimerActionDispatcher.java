@@ -16,7 +16,6 @@ public class TimerActionDispatcher {
     }
 
     public Future<Void> dispatch(Row timerRow) {
-        Long timerId = timerRow.getLong("id");
         Long workflowId = timerRow.getLong("workflow_id");
         String timerType = timerRow.getString("timer_type");
         JsonObject action = actionJson(timerRow);
@@ -30,7 +29,6 @@ public class TimerActionDispatcher {
                 }
                 return Future.failedFuture(err);
             })
-            .compose(v -> timerService.markFired(timerId))
             .mapEmpty();
     }
 

@@ -8,13 +8,14 @@ import io.vertx.core.Future;
 import io.vertx.core.Promise;
 import io.vertx.core.impl.logging.Logger;
 import io.vertx.core.impl.logging.LoggerFactory;
-import io.vertx.sqlclient.Row;
 
 public class TimerWorkerVerticle extends AbstractVerticle {
 
     private static final Logger log = LoggerFactory.getLogger(TimerWorkerVerticle.class);
 
     private long periodicTimerId;
+    // skips a tick while the previous batch is still in flight; efficiency only, claims are DB-fenced
+    private boolean busy;
 
     @Override
     public void start(Promise<Void> startPromise) {
@@ -23,29 +24,27 @@ public class TimerWorkerVerticle extends AbstractVerticle {
                 TimerService timerService = new TimerService(pool);
                 WorkflowEngine workflowEngine = new WorkflowEngine(pool);
                 TimerActionDispatcher dispatcher = new TimerActionDispatcher(timerService, workflowEngine);
+                TimerProcessor processor = new TimerProcessor(pool, dispatcher::dispatch);
 
                 String workerId = Env.get("WORKER_ID", "timer-worker-" + System.currentTimeMillis());
-                int batchSize = Integer.parseInt(Env.get("QUEUE_CLAIM_BATCH_SIZE", "10"));
-                int lockSeconds = Integer.parseInt(Env.get("QUEUE_LOCK_SECONDS", "60"));
+                int batchSize = Env.getInt("QUEUE_CLAIM_BATCH_SIZE", 10);
+                int lockSeconds = Env.getInt("QUEUE_LOCK_SECONDS", 60);
 
-                periodicTimerId = vertx.setPeriodic(5000, id -> claimAndProcess(timerService, dispatcher, workerId, batchSize, lockSeconds));
+                periodicTimerId = vertx.setPeriodic(5000, id -> tick(timerService, processor, workerId, batchSize, lockSeconds));
                 startPromise.complete();
             })
             .onFailure(startPromise::fail);
     }
 
-    private void claimAndProcess(TimerService timerService, TimerActionDispatcher dispatcher,
-                                 String workerId, int batchSize, int lockSeconds) {
+    private void tick(TimerService timerService, TimerProcessor processor, String workerId, int batchSize, int lockSeconds) {
+        if (busy) {
+            return;
+        }
+        busy = true;
         timerService.claimDueTimers(workerId, batchSize, lockSeconds)
-            .compose(rows -> {
-                Future<Void> chain = Future.succeededFuture();
-                for (Row row : rows) {
-                    chain = chain.compose(v -> dispatcher.dispatch(row)
-                        .onFailure(err -> log.error("Timer dispatch failed for timer " + row.getLong("id"), err)));
-                }
-                return chain;
-            })
-            .onFailure(err -> log.error("Timer claim failed", err));
+            .compose(processor::fireAll)
+            .onFailure(err -> log.error("Timer claim failed", err))
+            .onComplete(ar -> busy = false);
     }
 
     @Override

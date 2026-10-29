@@ -90,7 +90,7 @@ class OutboundDispatcherTest {
         sqlClient.preparedQuery("INSERT INTO np_operators (operator_code, operator_name) VALUES ('OPX', 'No Endpoint')")
             .execute()
             .compose(v -> sqlClient.query("SELECT id FROM np_operators WHERE operator_code = 'OPX'").execute())
-            .compose(rows -> OutboundDispatcherVerticle.resolveEndpoint(pool, rows.iterator().next().getLong("id")))
+            .compose(rows -> OutboxDispatcher.resolveEndpoint(pool, rows.iterator().next().getLong("id")))
             .onComplete(ctx.succeeding(url -> ctx.verify(() -> {
                 assertNull(url);
                 ctx.completeNow();
@@ -115,7 +115,7 @@ class OutboundDispatcherTest {
                         VALUES (?, 'NPG_INBOUND', 'https://opy.example.com/inactive', FALSE)
                         """)
                         .execute(io.vertx.sqlclient.Tuple.of(operatorId)))
-                    .compose(v -> OutboundDispatcherVerticle.resolveEndpoint(pool, operatorId));
+                    .compose(v -> OutboxDispatcher.resolveEndpoint(pool, operatorId));
             })
             .onComplete(ctx.succeeding(url -> ctx.verify(() -> {
                 assertEquals("https://opy.example.com/np/inbound", url);

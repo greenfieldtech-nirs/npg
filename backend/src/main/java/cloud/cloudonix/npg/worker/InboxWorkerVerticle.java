@@ -1,8 +1,8 @@
 package cloud.cloudonix.npg.worker;
 
-import cloud.cloudonix.npg.config.Env;
 import cloud.cloudonix.npg.audit.XmlAuditService;
 import cloud.cloudonix.npg.config.DatabaseConfig;
+import cloud.cloudonix.npg.config.Env;
 import cloud.cloudonix.npg.config.MongoConfig;
 import cloud.cloudonix.npg.number.NumberOwnershipService;
 import cloud.cloudonix.npg.protocol.ProtocolCatalogLoader;
@@ -16,13 +16,14 @@ import io.vertx.core.impl.logging.Logger;
 import io.vertx.core.impl.logging.LoggerFactory;
 import io.vertx.ext.mongo.MongoClient;
 import io.vertx.sqlclient.Pool;
-import io.vertx.sqlclient.Row;
 
 public class InboxWorkerVerticle extends AbstractVerticle {
 
     private static final Logger log = LoggerFactory.getLogger(InboxWorkerVerticle.class);
 
     private long periodicTimerId;
+    // skips a tick while the previous batch is still in flight; efficiency only, claims are DB-fenced
+    private boolean busy;
 
     @Override
     public void start(Promise<Void> startPromise) {
@@ -43,31 +44,26 @@ public class InboxWorkerVerticle extends AbstractVerticle {
                 WorkflowHandlerRegistry registry = new WorkflowHandlerRegistry(pool, xmlAuditService,
                     catalogLoader, workflowEngine, ownershipService);
                 String workerId = Env.get("WORKER_ID", "worker-" + System.currentTimeMillis());
-                int batchSize = Integer.parseInt(Env.get("QUEUE_CLAIM_BATCH_SIZE", "10"));
-                int lockSeconds = Integer.parseInt(Env.get("QUEUE_LOCK_SECONDS", "60"));
+                int batchSize = Env.getInt("QUEUE_CLAIM_BATCH_SIZE", 10);
+                int lockSeconds = Env.getInt("QUEUE_LOCK_SECONDS", 60);
+                InboxProcessor processor = new InboxProcessor(pool, registry::handle, lockSeconds);
 
-                periodicTimerId = vertx.setPeriodic(2000, id -> claimAndProcess(inboxRepository, registry, workerId, batchSize, lockSeconds));
+                periodicTimerId = vertx.setPeriodic(2000, id -> tick(inboxRepository, processor, workerId, batchSize, lockSeconds));
                 startPromise.complete();
             })
             .onFailure(startPromise::fail);
     }
 
-    private void claimAndProcess(InboxRepository inboxRepository, WorkflowHandlerRegistry registry,
-                                 String workerId, int batchSize, int lockSeconds) {
+    private void tick(InboxRepository inboxRepository, InboxProcessor processor,
+                      String workerId, int batchSize, int lockSeconds) {
+        if (busy) {
+            return;
+        }
+        busy = true;
         inboxRepository.claimBatch(workerId, batchSize, lockSeconds)
-            .onSuccess(rows -> {
-                for (Row row : rows) {
-                    Long inboxId = row.getLong("id");
-                    inboxRepository.markProcessing(inboxId)
-                        .compose(v -> registry.handle(row))
-                        .compose(v -> inboxRepository.markSucceeded(inboxId))
-                        .onFailure(err -> {
-                            log.error("Inbox item processing failed: " + inboxId, err);
-                            inboxRepository.markFinalFailure(inboxId, "HANDLER_ERROR", err.getMessage());
-                        });
-                }
-            })
-            .onFailure(err -> log.error("Inbox claim failed", err));
+            .compose(processor::processAll)
+            .onFailure(err -> log.error("Inbox claim failed", err))
+            .onComplete(ar -> busy = false);
     }
 
     @Override
