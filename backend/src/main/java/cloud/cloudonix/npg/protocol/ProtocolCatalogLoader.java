@@ -10,60 +10,90 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+/**
+ * The protocol model from docs/protocol (message catalog, timer matrix, rejection codes, field
+ * dictionary). Files are read once, at construction, so request handling never touches the disk.
+ */
 public class ProtocolCatalogLoader {
 
-    private final Vertx vertx;
-    private final String basePath;
+    private final JsonObject messageCatalog;
+    private final JsonObject timerMatrix;
+    private final JsonObject rejectionCodes;
+    private final JsonObject fieldDictionary;
+    private final Map<String, JsonObject> messagesByName;
+    private final Map<String, Integer> nackHttpStatus;
+    private final java.util.Set<String> responseTypes;
 
     public ProtocolCatalogLoader(Vertx vertx, String basePath) {
-        this.vertx = vertx;
-        this.basePath = basePath;
+        this.messageCatalog = loadYaml(vertx, basePath, "message-catalog.yml");
+        this.timerMatrix = loadYaml(vertx, basePath, "timer-matrix.yml");
+        this.rejectionCodes = loadYaml(vertx, basePath, "rejection-codes.yml");
+        this.fieldDictionary = loadYaml(vertx, basePath, "field-dictionary.yml");
+        Map<String, JsonObject> byName = new java.util.LinkedHashMap<>();
+        for (Object o : messageCatalog.getJsonArray("messages", new JsonArray())) {
+            JsonObject msg = (JsonObject) o;
+            byName.put(msg.getString("name"), msg);
+        }
+        this.messagesByName = java.util.Collections.unmodifiableMap(byName);
+        // a response is whatever another message names as its business_response
+        this.responseTypes = byName.values().stream()
+            .map(m -> m.getString("business_response"))
+            .filter(java.util.Objects::nonNull)
+            .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        Map<String, Integer> statuses = new java.util.HashMap<>();
+        for (Object o : rejectionCodes.getJsonArray("technical_rejection_codes", new JsonArray())) {
+            JsonObject code = (JsonObject) o;
+            if (code.getInteger("http_status") != null) {
+                statuses.put(code.getString("code"), code.getInteger("http_status"));
+            }
+        }
+        this.nackHttpStatus = java.util.Collections.unmodifiableMap(statuses);
     }
 
     public JsonObject loadMessageCatalog() {
-        return loadYaml("message-catalog.yml");
+        return messageCatalog;
     }
 
     public JsonObject loadTimerMatrix() {
-        return loadYaml("timer-matrix.yml");
+        return timerMatrix;
     }
 
     public JsonObject loadRejectionCodes() {
-        return loadYaml("rejection-codes.yml");
+        return rejectionCodes;
     }
 
     public JsonObject loadFieldDictionary() {
-        return loadYaml("field-dictionary.yml");
+        return fieldDictionary;
     }
 
     @SuppressWarnings("unchecked")
-    private JsonObject loadYaml(String fileName) {
+    private static JsonObject loadYaml(Vertx vertx, String basePath, String fileName) {
         try {
             Buffer buffer = vertx.fileSystem().readFileBlocking(basePath + "/" + fileName);
             Yaml yaml = new Yaml();
             Map<String, Object> loaded = yaml.load(buffer.toString());
             return loaded == null ? new JsonObject() : new JsonObject(loaded);
         } catch (Exception e) {
-            throw new IllegalStateException("Failed to load " + fileName, e);
+            throw new IllegalStateException("Failed to load " + basePath + "/" + fileName, e);
         }
     }
 
     public Optional<JsonObject> findMessage(String messageType) {
-        JsonArray messages = loadMessageCatalog().getJsonArray("messages", new JsonArray());
-        for (Object o : messages) {
-            JsonObject msg = (JsonObject) o;
-            if (messageType.equals(msg.getString("name"))) {
-                return Optional.of(msg);
-            }
-        }
-        return Optional.empty();
+        return messageType == null ? Optional.empty() : Optional.ofNullable(messagesByName.get(messageType));
     }
 
     public List<String> knownMessageTypes() {
-        JsonArray messages = loadMessageCatalog().getJsonArray("messages", new JsonArray());
-        return messages.stream()
-            .map(o -> ((JsonObject) o).getString("name"))
-            .toList();
+        return List.copyOf(messagesByName.keySet());
+    }
+
+    /** True for messages that answer another message (and must therefore carry requestTrxNo). */
+    public boolean isResponse(String messageType) {
+        return responseTypes.contains(messageType);
+    }
+
+    /** HTTP status for a technical NACK code (rejection-codes.yml), 400 when unspecified. */
+    public int httpStatusForNack(String nackCode) {
+        return nackHttpStatus.getOrDefault(nackCode, 400);
     }
 
     public ProtocolHeader extractHeader(org.w3c.dom.Document document) {

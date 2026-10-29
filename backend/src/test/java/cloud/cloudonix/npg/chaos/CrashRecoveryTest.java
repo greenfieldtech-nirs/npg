@@ -5,7 +5,7 @@ import cloud.cloudonix.npg.config.DatabaseConfig;
 import cloud.cloudonix.npg.config.MongoConfig;
 import cloud.cloudonix.npg.outbound.OutboundResult;
 import cloud.cloudonix.npg.outbound.OutboxDispatcher;
-import cloud.cloudonix.npg.outbound.OutboxWriter;
+import cloud.cloudonix.npg.outbound.OutboundMessageService;
 import cloud.cloudonix.npg.outbound.TransportAdapter;
 import cloud.cloudonix.npg.repository.InboxRepository;
 import cloud.cloudonix.npg.repository.MessageRepository;
@@ -334,21 +334,71 @@ class CrashRecoveryTest {
     }
 
     @Test
-    void ackMarksOutboxSucceeded(VertxTestContext ctx) {
+    void ackMarksOutboxSucceededAndSendsTheStoredProtocolHeaders(VertxTestContext ctx) {
+        java.util.concurrent.atomic.AtomicReference<JsonObject> sentHeaders = new java.util.concurrent.atomic.AtomicReference<>();
+        TransportAdapter capturing = (url, xml, headers) -> {
+            sentHeaders.set(headers);
+            return Future.succeededFuture(OutboundResult.ack());
+        };
         writeOutbound("Check")
             .compose(v -> outbox.claimBatch("w", 10, 60))
-            .compose(rows -> dispatcher(okTransport()).dispatchAll(rows))
-            .compose(v -> pool.query("SELECT status, attempts FROM np_outbox").execute())
+            .compose(rows -> dispatcher(capturing).dispatchAll(rows))
+            .compose(v -> pool.query("""
+                    SELECT o.status, o.attempts, m.technical_status, m.ack_status, m.transaction_id, m.request_id
+                    FROM np_outbox o JOIN np_messages m ON m.id = o.message_id""").execute())
             .onComplete(ctx.succeeding(rows -> ctx.verify(() -> {
-                assertEquals("SUCCEEDED", rows.iterator().next().getString("status"));
-                assertEquals(1, rows.iterator().next().getInteger("attempts"));
+                Row row = rows.iterator().next();
+                assertEquals("SUCCEEDED", row.getString("status"));
+                assertEquals(1, row.getInteger("attempts"));
+                assertEquals("DELIVERED", row.getString("technical_status"));
+                assertEquals("ACK", row.getString("ack_status"));
+                JsonObject h = sentHeaders.get();
+                assertEquals("Check", h.getString("X-NP-MSG-TYPE"));
+                assertEquals("LOCAL", h.getString("X-NP-FROM"));
+                assertEquals("PEER", h.getString("X-NP-TO"));
+                assertEquals(row.getString("transaction_id"), h.getString("X-NP-TRX-NO"));
+                assertEquals(row.getString("request_id"), h.getString("X-NP-REQUEST-ID"));
+                assertTrue(h.getString("X-NP-TRX-NO").matches("LOCAL\\d{12}"), h.getString("X-NP-TRX-NO"));
+                assertFalse(h.containsKey("X-NP-RETRY-NO"), "first attempt is not a retry");
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void retriesAreMarkedWithRetryNumber(VertxTestContext ctx) {
+        java.util.concurrent.atomic.AtomicReference<JsonObject> sentHeaders = new java.util.concurrent.atomic.AtomicReference<>();
+        TransportAdapter capturing = (url, xml, headers) -> {
+            sentHeaders.set(headers);
+            return Future.succeededFuture(OutboundResult.ack());
+        };
+        writeOutbound("Check")
+            .compose(v -> pool.query("UPDATE np_outbox SET attempts = 2").execute())
+            .compose(v -> outbox.claimBatch("w", 10, 60))
+            .compose(rows -> dispatcher(capturing).dispatchAll(rows))
+            .onComplete(ctx.succeeding(v -> ctx.verify(() -> {
+                assertEquals("2", sentHeaders.get().getString("X-NP-RETRY-NO"));
+                assertNotNull(sentHeaders.get().getString("X-NP-RETRY-DATE"));
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void protocolIdsFollowTheTraceShapeAndNeverRepeat(VertxTestContext ctx) {
+        cloud.cloudonix.npg.protocol.ProtocolIds.nextTrxNo(pool, "HL")
+            .compose(a -> cloud.cloudonix.npg.protocol.ProtocolIds.nextTrxNo(pool, "HL").map(b -> new String[]{a, b}))
+            .compose(trx -> cloud.cloudonix.npg.protocol.ProtocolIds.nextRequestId(pool, "HL", "BZ")
+                .map(req -> new String[]{trx[0], trx[1], req}))
+            .onComplete(ctx.succeeding(ids -> ctx.verify(() -> {
+                assertTrue(ids[0].matches("HL\\d{12}"), ids[0]);
+                assertNotEquals(ids[0], ids[1]);
+                assertTrue(ids[2].matches("NPHLBZ\\d{6}\\d{9}"), ids[2]);
                 ctx.completeNow();
             })));
     }
 
     @Test
     void transportErrorIsRetried(VertxTestContext ctx) {
-        TransportAdapter down = (url, xml) -> Future.succeededFuture(OutboundResult.transportError("TRANSPORT_ERROR", "refused"));
+        TransportAdapter down = (url, xml, headers) -> Future.succeededFuture(OutboundResult.transportError("TRANSPORT_ERROR", "refused"));
         writeOutbound("Check")
             .compose(v -> outbox.claimBatch("w", 10, 60))
             .compose(rows -> dispatcher(down).dispatchAll(rows))
@@ -362,7 +412,7 @@ class CrashRecoveryTest {
 
     @Test
     void nackStopsAndOpensManualTask(VertxTestContext ctx) {
-        TransportAdapter rejecting = (url, xml) -> Future.succeededFuture(OutboundResult.nack("NACK_X", "bad header"));
+        TransportAdapter rejecting = (url, xml, headers) -> Future.succeededFuture(OutboundResult.nack("NACK_X", "bad header"));
         writeOutbound("Check")
             .compose(v -> outbox.claimBatch("w", 10, 60))
             .compose(rows -> dispatcher(rejecting).dispatchAll(rows))
@@ -380,7 +430,7 @@ class CrashRecoveryTest {
     @Test
     void failureBeforeSendIsAnOrdinaryRetryNotUnknownDelivery(VertxTestContext ctx) {
         AtomicInteger sends = new AtomicInteger();
-        TransportAdapter counting = (url, xml) -> {
+        TransportAdapter counting = (url, xml, headers) -> {
             sends.incrementAndGet();
             return Future.succeededFuture(OutboundResult.ack());
         };
@@ -449,7 +499,7 @@ class CrashRecoveryTest {
     }
 
     private static TransportAdapter okTransport() {
-        return (url, xml) -> Future.succeededFuture(OutboundResult.ack());
+        return (url, xml, headers) -> Future.succeededFuture(OutboundResult.ack());
     }
 
     private Future<Long> insertInboxItem(int maxAttempts) {
@@ -482,9 +532,10 @@ class CrashRecoveryTest {
                         INSERT INTO np_operator_endpoints (operator_id, endpoint_type, endpoint_url)
                         VALUES (?, 'NPG_INBOUND', 'https://peer.example/np/inbound')
                         """).execute(Tuple.of(operatorId))
-                    .compose(v -> new OutboxWriter(pool, xmlAuditService).writeOutbound(null, operatorId, type,
-                        "LOCAL", "PEER", "REQ-" + UUID.randomUUID(), "TX-" + UUID.randomUUID(), null, "4.0",
-                        new JsonObject().put("number", "0501234567")));
+                    .compose(v -> new OutboundMessageService(xmlAuditService).send(pool, null, type, "PORT",
+                        new cloud.cloudonix.npg.domain.Operator(null, "LOCAL", "Local", null, true, "UP"),
+                        new cloud.cloudonix.npg.domain.Operator(operatorId, "PEER", "Peer", null, true, "UP"),
+                        "REQ-" + UUID.randomUUID(), null, new JsonObject().put("number", "0501234567")));
             })
             .mapEmpty();
     }

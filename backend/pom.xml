@@ -149,6 +149,8 @@
                     <systemPropertyVariables>
                         <!-- dev-mode conveniences (default JWT secret, seeded admin123) are test-only -->
                         <NPG_ENV>test</NPG_ENV>
+                        <!-- tests run from backend/; the repo's protocol model is one level up -->
+                        <CATALOG_PATH>../docs/protocol</CATALOG_PATH>
                     </systemPropertyVariables>
                 </configuration>
             </plugin>

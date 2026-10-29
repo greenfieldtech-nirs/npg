@@ -2,6 +2,7 @@ package cloud.cloudonix.npg.outbound;
 
 import cloud.cloudonix.npg.audit.XmlAuditService;
 import cloud.cloudonix.npg.repository.ManualTaskRepository;
+import cloud.cloudonix.npg.repository.MessageRepository;
 import cloud.cloudonix.npg.repository.OutboxRepository;
 import cloud.cloudonix.npg.retry.RetryDecision;
 import cloud.cloudonix.npg.retry.RetryPolicyService;
@@ -9,6 +10,7 @@ import cloud.cloudonix.npg.retry.UnknownDeliveryPolicy;
 import io.vertx.core.Future;
 import io.vertx.core.impl.logging.Logger;
 import io.vertx.core.impl.logging.LoggerFactory;
+import io.vertx.core.json.JsonObject;
 import io.vertx.sqlclient.Pool;
 import io.vertx.sqlclient.Row;
 import io.vertx.sqlclient.SqlClient;
@@ -81,7 +83,7 @@ public class OutboxDispatcher {
                 }
                 // from here the peer may receive the message: failures recording the outcome leave
                 // the row SENDING for the unknown-delivery sweep instead of guessing
-                return transport.send(send.endpointUrl(), send.rawXml())
+                return transport.send(send.endpointUrl(), send.rawXml(), send.headers())
                     .compose(result -> recordResult(row, token, result));
             });
         });
@@ -90,7 +92,10 @@ public class OutboxDispatcher {
     private Future<Void> recordResult(Row row, String token, OutboundResult result) {
         Long id = row.getLong("id");
         if (result.success() && "ACK".equals(result.ackStatus())) {
-            return outbox.markSent(id, token).mapEmpty();
+            return pool.withTransaction(tx -> new OutboxRepository(tx).markSent(id, token)
+                .compose(owned -> owned
+                    ? new MessageRepository(tx).recordDelivery(row.getLong("message_id"), "ACK", null)
+                    : Future.<Void>succeededFuture()));
         }
         if ("NACK".equals(result.ackStatus())) {
             // a technical rejection will not change on retry: stop and tell the NOC
@@ -117,7 +122,11 @@ public class OutboxDispatcher {
         log.warn("Outbox item " + row.getLong("id") + " needs manual review (" + code + "): " + reason);
         return pool.withTransaction(tx -> new OutboxRepository(tx)
             .markManualReview(row.getLong("id"), token, code, reason)
-            .compose(owned -> owned ? openTask(tx, row, "OUTBOUND_DELIVERY_FAILED", reason) : Future.succeededFuture()));
+            .compose(owned -> owned
+                ? new MessageRepository(tx).recordDelivery(row.getLong("message_id"),
+                        code.startsWith("NACK") ? "NACK" : "FAILED", code)
+                    .compose(v -> openTask(tx, row, "OUTBOUND_DELIVERY_FAILED", reason))
+                : Future.succeededFuture()));
     }
 
     /**
@@ -153,7 +162,7 @@ public class OutboxDispatcher {
             taskType, ManualTaskRepository.SEVERITY_HIGH, description).mapEmpty();
     }
 
-    private record Prepared(String rawXml, String endpointUrl) {
+    private record Prepared(String rawXml, JsonObject headers, String endpointUrl) {
     }
 
     private Future<Prepared> prepare(Row row) {
@@ -169,8 +178,16 @@ public class OutboxDispatcher {
                 if (doc == null || doc.getString("rawXml") == null) {
                     return Future.failedFuture("Raw XML audit document missing for outbox " + row.getLong("id"));
                 }
+                JsonObject transportMeta = doc.getJsonObject("transport", new JsonObject());
+                JsonObject headers = transportMeta.getJsonObject("headers", new JsonObject()).copy();
+                int previousAttempts = row.getInteger("attempts");
+                if (previousAttempts > 0) {
+                    headers.put("X-NP-RETRY-NO", String.valueOf(previousAttempts))
+                        .put("X-NP-RETRY-DATE", java.time.OffsetDateTime.now(java.time.ZoneId.of("Asia/Jerusalem"))
+                            .truncatedTo(java.time.temporal.ChronoUnit.SECONDS).toString());
+                }
                 return resolveEndpoint(pool, row.getLong("destination_operator_id"))
-                    .map(url -> new Prepared(doc.getString("rawXml"), url));
+                    .map(url -> new Prepared(doc.getString("rawXml"), headers, url));
             });
     }
 
