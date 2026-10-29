@@ -7,6 +7,10 @@ import io.vertx.sqlclient.Row;
 
 public class DashboardApiHandler {
 
+    // quoted literals from the state machines (constants, not user input)
+    private static final String FINISHED = String.join(", ",
+        cloud.cloudonix.npg.workflow.StateMachines.finishedStates().stream().map(st -> "'" + st + "'").toList());
+
     private final Pool pool;
 
     public DashboardApiHandler(Pool pool) {
@@ -16,14 +20,21 @@ public class DashboardApiHandler {
     public Future<JsonObject> getDashboard() {
         return pool.query("""
                 SELECT
-                  (SELECT COUNT(*) FROM np_workflows WHERE current_state NOT IN ('COMPLETED', 'CANCELLED', 'FAILED')) AS activeWorkflows,
+                  (SELECT COUNT(*) FROM np_workflows WHERE current_state NOT IN (%s)) AS activeWorkflows,
                   (SELECT COUNT(*) FROM np_inbox WHERE status IN ('PENDING', 'CLAIMED', 'PROCESSING')) AS inboxPending,
                   (SELECT COUNT(*) FROM np_outbox WHERE status IN ('PENDING', 'CLAIMED', 'SENDING')) AS outboxPending,
                   (SELECT COUNT(*) FROM np_manual_tasks WHERE status = 'OPEN') AS openManualTasks,
                   (SELECT COUNT(*) FROM np_workflows WHERE current_state = 'FAILED') AS failedWorkflows,
                   (SELECT COUNT(*) FROM np_operators WHERE availability_status = 'DOWN') AS operatorsDown,
-                  (SELECT COUNT(*) FROM np_timers WHERE status = 'PENDING' AND due_at <= UTC_TIMESTAMP(6)) AS timersDue
-                """
+                  (SELECT COUNT(*) FROM np_timers WHERE status = 'PENDING' AND due_at <= UTC_TIMESTAMP(6)) AS timersDue,
+                  (SELECT COUNT(*) FROM np_timers WHERE status = 'PENDING' AND due_at > UTC_TIMESTAMP(6)
+                     AND due_at <= UTC_TIMESTAMP(6) + INTERVAL 1 HOUR) AS timersDueSoon,
+                  (SELECT COUNT(*) FROM np_workflows WHERE current_state = 'MANUAL_REVIEW') AS workflowsInManualReview,
+                  (SELECT COUNT(*) FROM np_outbox WHERE status IN ('UNKNOWN_DELIVERY', 'MANUAL_REVIEW')) AS outboxNeedsAttention,
+                  (SELECT COUNT(*) FROM np_inbox WHERE status = 'FAILED_FINAL') AS inboxFailed,
+                  (SELECT COUNT(*) FROM np_publication_recipients WHERE status = 'SENT') AS publicationBacklog,
+                  (SELECT COUNT(*) FROM np_operators WHERE requires_configuration = TRUE) AS operatorsNeedingConfiguration
+                """.formatted(FINISHED)
             )
             .execute()
             .map(rows -> {
@@ -36,7 +47,13 @@ public class DashboardApiHandler {
                     .put("openManualTasks", row.getLong("openManualTasks"))
                     .put("failedWorkflows", row.getLong("failedWorkflows"))
                     .put("operatorsDown", row.getLong("operatorsDown"))
-                    .put("timersDue", row.getLong("timersDue"));
+                    .put("timersDue", row.getLong("timersDue"))
+                    .put("timersDueSoon", row.getLong("timersDueSoon"))
+                    .put("workflowsInManualReview", row.getLong("workflowsInManualReview"))
+                    .put("outboxNeedsAttention", row.getLong("outboxNeedsAttention"))
+                    .put("inboxFailed", row.getLong("inboxFailed"))
+                    .put("publicationBacklog", row.getLong("publicationBacklog"))
+                    .put("operatorsNeedingConfiguration", row.getLong("operatorsNeedingConfiguration"));
             });
     }
 }

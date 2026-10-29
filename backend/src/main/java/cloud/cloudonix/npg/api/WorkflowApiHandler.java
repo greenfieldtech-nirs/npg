@@ -18,22 +18,37 @@ public class WorkflowApiHandler {
     }
 
     public Future<JsonArray> searchWorkflows(String phoneNumber, String state, int page, int size) {
-        StringBuilder sql = new StringBuilder("SELECT * FROM np_workflows WHERE 1=1");
+        return searchWorkflows(new JsonObject().put("phoneNumber", phoneNumber).put("state", state), page, size);
+    }
+
+    /** Filters: phoneNumber, state, requestId, workflowType, localRole, operatorCode (counterparty). */
+    public Future<JsonArray> searchWorkflows(JsonObject filters, int page, int size) {
+        if (size < 1 || size > 500 || page < 0) {
+            return Future.failedFuture(new ApiError(400, "page must be >= 0 and size between 1 and 500"));
+        }
+        StringBuilder sql = new StringBuilder("""
+            SELECT w.*, c.operator_code AS counterparty_code FROM np_workflows w
+            LEFT JOIN np_operators c ON c.id = w.counterparty_operator_id WHERE 1=1""");
         Tuple params = Tuple.tuple();
-        if (phoneNumber != null) {
-            sql.append(" AND phone_number = ?");
-            params.addValue(phoneNumber);
-        }
-        if (state != null) {
-            sql.append(" AND current_state = ?");
-            params.addValue(state);
-        }
-        sql.append(" ORDER BY updated_at DESC LIMIT ? OFFSET ?");
+        filter(sql, params, " AND w.phone_number = ?", filters.getString("phoneNumber"));
+        filter(sql, params, " AND w.current_state = ?", filters.getString("state"));
+        filter(sql, params, " AND w.request_id = ?", filters.getString("requestId"));
+        filter(sql, params, " AND w.workflow_type = ?", filters.getString("workflowType"));
+        filter(sql, params, " AND w.local_role = ?", filters.getString("localRole"));
+        filter(sql, params, " AND c.operator_code = ?", filters.getString("operatorCode"));
+        sql.append(" ORDER BY w.updated_at DESC LIMIT ? OFFSET ?");
         params.addValue(size);
         params.addValue(page * size);
         return pool.preparedQuery(sql.toString())
             .execute(params)
             .map(RowJson::rowsToJsonArray);
+    }
+
+    private static void filter(StringBuilder sql, Tuple params, String clause, String value) {
+        if (value != null && !value.isBlank()) {
+            sql.append(clause);
+            params.addValue(value.trim());
+        }
     }
 
     public Future<JsonObject> getWorkflow(String workflowUuid) {
