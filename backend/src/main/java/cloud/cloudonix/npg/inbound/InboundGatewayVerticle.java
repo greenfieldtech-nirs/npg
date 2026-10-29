@@ -1,9 +1,12 @@
 package cloud.cloudonix.npg.inbound;
 
+import cloud.cloudonix.npg.acknack.TechnicalAck;
+import cloud.cloudonix.npg.acknack.TechnicalAckStatus;
 import cloud.cloudonix.npg.audit.XmlTransportMetadata;
 import cloud.cloudonix.npg.config.DatabaseConfig;
 import cloud.cloudonix.npg.config.MongoConfig;
 import cloud.cloudonix.npg.protocol.ProtocolCatalogLoader;
+import cloud.cloudonix.npg.security.ClientAddress;
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.Future;
 import io.vertx.core.Promise;
@@ -22,6 +25,7 @@ public class InboundGatewayVerticle extends AbstractVerticle {
     private static final Logger log = LoggerFactory.getLogger(InboundGatewayVerticle.class);
 
     private HttpServer server;
+    private final ClientAddress clientAddress = ClientAddress.fromEnvironment();
 
     @Override
     public void start(Promise<Void> startPromise) {
@@ -41,7 +45,7 @@ public class InboundGatewayVerticle extends AbstractVerticle {
 
                 Router router = Router.router(vertx);
                 router.route().handler(BodyHandler.create().setBodyLimit(1024 * 1024));
-                router.post("/np/inbound").handler(ctx -> handleInbound(ctx, service));
+                router.post("/np/inbound").handler(ctx -> handleInbound(ctx, service, catalogLoader));
                 router.get("/health/live").handler(ctx -> ctx.response().setStatusCode(200).end("OK"));
                 router.get("/health/ready").handler(ctx -> ctx.response().setStatusCode(200).end("OK"));
                 router.get("/metrics").handler(ctx ->
@@ -61,31 +65,42 @@ public class InboundGatewayVerticle extends AbstractVerticle {
             .onFailure(startPromise::fail);
     }
 
-    private void handleInbound(RoutingContext ctx, InboundGatewayService service) {
+    private void handleInbound(RoutingContext ctx, InboundGatewayService service, ProtocolCatalogLoader catalog) {
         String rawXml = ctx.body().asString();
-        String remoteIp = ctx.request().remoteAddress() != null ? ctx.request().remoteAddress().host() : null;
-        XmlTransportMetadata transport = new XmlTransportMetadata("HTTPS", remoteIp, null, new JsonObject());
 
-        // Real trace delivers NP header fields out-of-band as X-NP-* HTTP headers.
+        // the observed wire format carries the NP header fields out-of-band as X-NP-* HTTP headers;
+        // they are part of the message and are stored with the raw XML for audit
         java.util.Map<String, String> transportHeaders = new java.util.HashMap<>();
+        JsonObject storedHeaders = new JsonObject();
         for (java.util.Map.Entry<String, String> h : ctx.request().headers()) {
-            if (h.getKey().toLowerCase(java.util.Locale.ROOT).startsWith("x-np-")) {
-                transportHeaders.put(h.getKey().toLowerCase(java.util.Locale.ROOT), h.getValue());
+            String name = h.getKey().toLowerCase(java.util.Locale.ROOT);
+            if (name.startsWith("x-np-")) {
+                transportHeaders.put(name, h.getValue());
+                storedHeaders.put(name, h.getValue());
             }
         }
+        String scheme = ctx.request().isSSL() ? "HTTPS" : "HTTP";
+        XmlTransportMetadata transport = new XmlTransportMetadata(scheme, clientAddress.resolve(ctx.request()),
+            null, storedHeaders);
 
         service.receive(rawXml, transport, transportHeaders)
             .onComplete(result -> {
                 if (result.succeeded()) {
+                    TechnicalAck ack = result.result();
+                    int status = ack.status() == TechnicalAckStatus.ACK ? 200
+                        : catalog.httpStatusForNack(ack.nackReason() != null ? ack.nackReason().code() : null);
                     ctx.response()
-                        .setStatusCode(result.result().status().name().equals("ACK") ? 200 : 400)
+                        .setStatusCode(status)
                         .putHeader("Content-Type", "application/xml")
-                        .end(result.result().toXml());
+                        .end(ack.toXml());
                 } else {
+                    // not ACKed: nothing was durably accepted, the peer must retry (docs/04)
                     log.error("Inbound handling failed", result.cause());
                     ctx.response()
                         .setStatusCode(500)
-                        .end("<AckNack><Status>NACK</Status><Code>NACK_INTERNAL_ERROR</Code></AckNack>");
+                        .putHeader("Content-Type", "application/xml")
+                        .end("<AckNack><Status>NACK</Status><NackReason><Code>NACK_INTERNAL_ERROR</Code>"
+                            + "<Message>Temporary failure, retry later</Message></NackReason></AckNack>");
                 }
             });
     }
