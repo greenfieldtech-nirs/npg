@@ -1,5 +1,9 @@
 package cloud.cloudonix.npg.security;
 
+import cloud.cloudonix.npg.config.Env;
+import cloud.cloudonix.npg.config.Env;
+import io.vertx.core.impl.logging.Logger;
+import io.vertx.core.impl.logging.LoggerFactory;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
 
@@ -14,8 +18,13 @@ import java.util.Optional;
 
 /**
  * Minimal HS256 JWT issuer/verifier — hand-rolled, no JWT library.
+ * Only HS256 tokens signed with our secret are accepted; the alg header is pinned.
  */
 public class JwtService {
+
+    private static final Logger log = LoggerFactory.getLogger(JwtService.class);
+    static final int MIN_SECRET_LENGTH = 32;
+    private static final String DEV_SECRET = "npg-dev-secret-not-for-production-use";
 
     public record AuthUser(String username, List<String> roles) {
     }
@@ -25,9 +34,24 @@ public class JwtService {
 
     private final byte[] secret;
 
-    public JwtService() {
-        // ponytail: dev-default secret; MUST override with NPG_JWT_SECRET in prod
-        this(System.getenv().getOrDefault("NPG_JWT_SECRET", "npg-dev-secret-change-me-in-prod"));
+    /**
+     * Builds the service from NPG_JWT_SECRET. Outside dev mode a missing or short secret is a
+     * startup failure: a guessable signing key lets anyone mint ADMIN tokens.
+     */
+    public static JwtService fromEnvironment() {
+        String secret = Env.get("NPG_JWT_SECRET");
+        if (Env.isDevMode()) {
+            if (secret == null) {
+                log.warn("NPG_JWT_SECRET not set — using the built-in dev secret (NPG_ENV=dev/test only)");
+                secret = DEV_SECRET;
+            }
+            return new JwtService(secret);
+        }
+        if (secret == null || secret.length() < MIN_SECRET_LENGTH) {
+            throw new IllegalStateException("NPG_JWT_SECRET must be set to at least " + MIN_SECRET_LENGTH
+                + " characters (set NPG_ENV=dev to use the built-in development secret)");
+        }
+        return new JwtService(secret);
     }
 
     public JwtService(String secret) {
@@ -52,6 +76,10 @@ public class JwtService {
         try {
             String[] parts = token.split("\\.", -1);
             if (parts.length != 3) {
+                return Optional.empty();
+            }
+            JsonObject header = new JsonObject(new String(B64D.decode(parts[0]), StandardCharsets.UTF_8));
+            if (!"HS256".equals(header.getString("alg"))) {
                 return Optional.empty();
             }
             String expected = sign(parts[0] + "." + parts[1]);

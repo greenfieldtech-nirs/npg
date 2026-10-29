@@ -1,6 +1,7 @@
 package cloud.cloudonix.npg.api;
 
 import cloud.cloudonix.npg.security.JwtService;
+import cloud.cloudonix.npg.security.LoginThrottle;
 import cloud.cloudonix.npg.security.PasswordService;
 import cloud.cloudonix.npg.security.UserRepository;
 import io.vertx.core.Future;
@@ -17,23 +18,31 @@ public class AuthApiHandler {
 
     private final UserRepository userRepository;
     private final JwtService jwtService;
+    private final LoginThrottle throttle;
 
-    public AuthApiHandler(Pool pool) {
+    public AuthApiHandler(Pool pool, JwtService jwtService, LoginThrottle throttle) {
         this.userRepository = new UserRepository(pool);
-        this.jwtService = new JwtService();
+        this.jwtService = jwtService;
+        this.throttle = throttle;
     }
 
-    public Future<JsonObject> login(JsonObject body) {
+    public Future<JsonObject> login(JsonObject body, String remoteIp) {
         String username = body != null ? body.getString("username") : null;
         String password = body != null ? body.getString("password") : null;
         if (username == null || username.isBlank() || password == null || password.isEmpty()) {
             return Future.failedFuture(new ApiError(400, "username and password are required"));
         }
+        String throttleKey = username + "|" + remoteIp;
+        if (throttle.isLocked(throttleKey)) {
+            return Future.failedFuture(new ApiError(429, "Too many failed login attempts, try again later"));
+        }
         return userRepository.findByUsername(username)
             .compose(user -> {
                 if (user == null || !user.active() || !PasswordService.verify(password, user.passwordHash())) {
+                    throttle.recordFailure(throttleKey);
                     return Future.failedFuture(new ApiError(401, "Invalid credentials"));
                 }
+                throttle.reset(throttleKey);
                 return userRepository.findRoles(user.id())
                     .map(roles -> new JsonObject()
                         .put("token", jwtService.issue(user.username(), roles, TOKEN_TTL))

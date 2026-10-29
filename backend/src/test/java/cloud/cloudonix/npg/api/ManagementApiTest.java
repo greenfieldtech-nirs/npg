@@ -3,6 +3,7 @@ package cloud.cloudonix.npg.api;
 import cloud.cloudonix.npg.config.AuthSeeder;
 import cloud.cloudonix.npg.config.DatabaseConfig;
 import cloud.cloudonix.npg.config.MongoConfig;
+import cloud.cloudonix.npg.security.JwtService;
 import cloud.cloudonix.npg.support.TestDatabase;
 import cloud.cloudonix.npg.support.TestMongo;
 import io.vertx.core.DeploymentOptions;
@@ -26,6 +27,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.io.IOException;
 import java.net.ServerSocket;
+import java.time.Duration;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -37,10 +39,12 @@ class ManagementApiTest {
     private static Pool pool;
     private static MongoClient mongoClient;
     private static WebClient webClient;
+    private static final String TEST_ADMIN = "tester";
 
     @BeforeAll
     static void setUpClass(Vertx v, VertxTestContext ctx) {
         vertx = v;
+        System.setProperty("NPG_ENV", "test");
         TestDatabase.start();
         TestMongo.start();
         System.setProperty("DB_HOST", TestDatabase.host());
@@ -103,6 +107,7 @@ class ManagementApiTest {
                 "INSERT INTO np_operators (operator_code, operator_name) VALUES (?, ?)")
                 .execute(Tuple.of("OP01", "Operator One")))
             .compose(v -> AuthSeeder.ensureSeeded(pool))
+            .compose(v -> seedUser(TEST_ADMIN, "tester-password", "ADMIN"))
             .onComplete(ctx.succeedingThenComplete());
     }
 
@@ -118,7 +123,7 @@ class ManagementApiTest {
     @Test
     void listOperatorsReturnsData(VertxTestContext ctx) {
         webClient.get("/api/operators")
-            .putHeader("X-User-Role", "ADMIN")
+            .putHeader("Authorization", adminAuth())
             .send()
             .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
                 assertEquals(200, resp.statusCode());
@@ -132,7 +137,7 @@ class ManagementApiTest {
     @Test
     void dashboardReturnsCounts(VertxTestContext ctx) {
         webClient.get("/api/dashboard")
-            .putHeader("X-User-Role", "ADMIN")
+            .putHeader("Authorization", adminAuth())
             .send()
             .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
                 assertEquals(200, resp.statusCode());
@@ -161,8 +166,7 @@ class ManagementApiTest {
     void manualTransitionSucceedsWithRole(VertxTestContext ctx) {
         seedWorkflow("REQ-MT-ADMIN")
             .compose(uuid -> webClient.post("/api/workflows/" + uuid + "/manual-transition")
-                .putHeader("X-User-Role", "ADMIN")
-                .putHeader("X-User-Id", "tester")
+                .putHeader("Authorization", adminAuth())
                 .sendJsonObject(new JsonObject().put("toState", "CHECK_SENT").put("reason", "test"))
                 .compose(resp -> {
                     ctx.verify(() -> assertEquals(200, resp.statusCode()));
@@ -197,8 +201,7 @@ class ManagementApiTest {
     @Test
     void createOperatorSucceeds(VertxTestContext ctx) {
         webClient.post("/api/operators")
-            .putHeader("X-User-Role", "ADMIN")
-            .putHeader("X-User-Id", "tester")
+            .putHeader("Authorization", adminAuth())
             .sendJsonObject(new JsonObject()
                 .put("operatorCode", "OP77").put("operatorName", "Seventy Seven")
                 .put("licenseType", "MOBILE").put("reason", "seed"))
@@ -208,7 +211,7 @@ class ManagementApiTest {
                     assertEquals("OP77", resp.bodyAsJsonObject().getString("operatorCode"));
                 });
                 return webClient.get("/api/operators/OP77")
-                    .putHeader("X-User-Role", "ADMIN")
+                    .putHeader("Authorization", adminAuth())
                     .send();
             })
             .compose(resp -> {
@@ -229,14 +232,12 @@ class ManagementApiTest {
             .put("operatorCode", "OP77").put("operatorName", "Seventy Seven")
             .put("licenseType", "MOBILE").put("reason", "seed");
         webClient.post("/api/operators")
-            .putHeader("X-User-Role", "ADMIN")
-            .putHeader("X-User-Id", "tester")
+            .putHeader("Authorization", adminAuth())
             .sendJsonObject(body)
             .compose(resp -> {
                 ctx.verify(() -> assertEquals(200, resp.statusCode()));
                 return webClient.post("/api/operators")
-                    .putHeader("X-User-Role", "ADMIN")
-                    .putHeader("X-User-Id", "tester")
+                    .putHeader("Authorization", adminAuth())
                     .sendJsonObject(body);
             })
             .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
@@ -248,23 +249,21 @@ class ManagementApiTest {
     @Test
     void updateOperatorChangesFields(VertxTestContext ctx) {
         webClient.post("/api/operators")
-            .putHeader("X-User-Role", "ADMIN")
-            .putHeader("X-User-Id", "tester")
+            .putHeader("Authorization", adminAuth())
             .sendJsonObject(new JsonObject()
                 .put("operatorCode", "OP77").put("operatorName", "Seventy Seven")
                 .put("licenseType", "MOBILE").put("reason", "seed"))
             .compose(resp -> {
                 ctx.verify(() -> assertEquals(200, resp.statusCode(), resp.bodyAsString()));
                 return webClient.put("/api/operators/OP77")
-                    .putHeader("X-User-Role", "ADMIN")
-                    .putHeader("X-User-Id", "tester")
+                    .putHeader("Authorization", adminAuth())
                     .sendJsonObject(new JsonObject()
                         .put("operatorName", "Renamed").put("isActive", false).put("reason", "rename"));
             })
             .compose(resp -> {
                 ctx.verify(() -> assertEquals(200, resp.statusCode(), resp.bodyAsString()));
                 return webClient.get("/api/operators/OP77")
-                    .putHeader("X-User-Role", "ADMIN")
+                    .putHeader("Authorization", adminAuth())
                     .send();
             })
             .compose(resp -> {
@@ -286,8 +285,7 @@ class ManagementApiTest {
     @Test
     void updateMissingReturns404(VertxTestContext ctx) {
         webClient.put("/api/operators/NOPE")
-            .putHeader("X-User-Role", "ADMIN")
-            .putHeader("X-User-Id", "tester")
+            .putHeader("Authorization", adminAuth())
             .sendJsonObject(new JsonObject().put("operatorName", "X").put("reason", "rename"))
             .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
                 assertEquals(404, resp.statusCode());
@@ -300,7 +298,7 @@ class ManagementApiTest {
         seedMessage("Check", "INBOUND", "REQ-PAIR", "TX-PAIR-1", null)
             .compose(v -> seedMessage("Check_response", "INBOUND", "REQ-PAIR", "TX-PAIR-2", "TX-PAIR-1"))
             .compose(responseUuid -> webClient.get("/api/messages/" + responseUuid + "/pair")
-                .putHeader("X-User-Role", "ADMIN")
+                .putHeader("Authorization", adminAuth())
                 .send())
             .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
                 assertEquals(200, resp.statusCode());
@@ -317,7 +315,7 @@ class ManagementApiTest {
         seedMessage("Check", "INBOUND", "REQ-F1", "TX-F1", null)
             .compose(v -> seedMessage("Publish", "OUTBOUND", "REQ-F2", "TX-F2", null))
             .compose(v -> webClient.get("/api/messages?direction=INBOUND")
-                .putHeader("X-User-Role", "ADMIN")
+                .putHeader("Authorization", adminAuth())
                 .send())
             .compose(resp -> {
                 ctx.verify(() -> {
@@ -326,7 +324,7 @@ class ManagementApiTest {
                     assertEquals("Check", body.getJsonObject(0).getString("messageType"));
                 });
                 return webClient.get("/api/messages?messageType=Publish")
-                    .putHeader("X-User-Role", "ADMIN")
+                    .putHeader("Authorization", adminAuth())
                     .send();
             })
             .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
@@ -351,7 +349,7 @@ class ManagementApiTest {
 
         seed
             .compose(v -> webClient.get("/api/numbers?prefix=08")
-                .putHeader("X-User-Role", "ADMIN")
+                .putHeader("Authorization", adminAuth())
                 .send())
             .compose(resp -> {
                 ctx.verify(() -> {
@@ -359,7 +357,7 @@ class ManagementApiTest {
                     assertEquals(2, body.size());
                 });
                 return webClient.get("/api/numbers?prefix=0861")
-                    .putHeader("X-User-Role", "ADMIN")
+                    .putHeader("Authorization", adminAuth())
                     .send();
             })
             .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
@@ -376,8 +374,7 @@ class ManagementApiTest {
             .put("endpointType", "NPG_INBOUND")
             .put("endpointUrl", "https://op01.example.com/np/inbound");
         webClient.post("/api/operators/OP01/endpoints")
-            .putHeader("X-User-Role", "ADMIN")
-            .putHeader("X-User-Id", "tester")
+            .putHeader("Authorization", adminAuth())
             .sendJsonObject(endpoint)
             .compose(resp -> {
                 ctx.verify(() -> {
@@ -389,7 +386,7 @@ class ManagementApiTest {
                     assertEquals("MTLS", body.getString("authMode"));
                 });
                 return webClient.get("/api/operators/OP01/endpoints")
-                    .putHeader("X-User-Role", "ADMIN")
+                    .putHeader("Authorization", adminAuth())
                     .send();
             })
             .compose(resp -> {
@@ -400,18 +397,17 @@ class ManagementApiTest {
                         body.getJsonObject(0).getString("endpointUrl"));
                 });
                 return webClient.get("/api/operators/OP01/endpoints")
-                    .putHeader("X-User-Role", "ADMIN")
+                    .putHeader("Authorization", adminAuth())
                     .send()
                     .compose(r -> webClient.delete("/api/operators/OP01/endpoints/"
                             + r.bodyAsJsonArray().getJsonObject(0).getLong("id"))
-                        .putHeader("X-User-Role", "ADMIN")
-                        .putHeader("X-User-Id", "tester")
+                        .putHeader("Authorization", adminAuth())
                         .send());
             })
             .compose(resp -> {
                 ctx.verify(() -> assertEquals(200, resp.statusCode(), resp.bodyAsString()));
                 return webClient.get("/api/operators/OP01/endpoints")
-                    .putHeader("X-User-Role", "ADMIN")
+                    .putHeader("Authorization", adminAuth())
                     .send();
             })
             .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
@@ -423,8 +419,7 @@ class ManagementApiTest {
     @Test
     void createEndpointRequiresOperator(VertxTestContext ctx) {
         webClient.post("/api/operators/NOPE/endpoints")
-            .putHeader("X-User-Role", "ADMIN")
-            .putHeader("X-User-Id", "tester")
+            .putHeader("Authorization", adminAuth())
             .sendJsonObject(new JsonObject()
                 .put("endpointType", "NPG_INBOUND")
                 .put("endpointUrl", "https://x.example.com/np/inbound"))
@@ -437,8 +432,7 @@ class ManagementApiTest {
     @Test
     void createEndpointValidatesUrl(VertxTestContext ctx) {
         webClient.post("/api/operators/OP01/endpoints")
-            .putHeader("X-User-Role", "ADMIN")
-            .putHeader("X-User-Id", "tester")
+            .putHeader("Authorization", adminAuth())
             .sendJsonObject(new JsonObject()
                 .put("endpointType", "NPG_INBOUND")
                 .put("endpointUrl", "ftp://x.example.com"))
@@ -451,28 +445,26 @@ class ManagementApiTest {
     @Test
     void localFlagIsExclusive(VertxTestContext ctx) {
         webClient.post("/api/operators")
-            .putHeader("X-User-Role", "ADMIN")
-            .putHeader("X-User-Id", "tester")
+            .putHeader("Authorization", adminAuth())
             .sendJsonObject(new JsonObject()
                 .put("operatorCode", "LOCAL-A").put("operatorName", "Local A").put("isLocal", true))
             .compose(resp -> {
                 ctx.verify(() -> assertEquals(200, resp.statusCode(), resp.bodyAsString()));
                 return webClient.post("/api/operators")
-                    .putHeader("X-User-Role", "ADMIN")
-                    .putHeader("X-User-Id", "tester")
+                    .putHeader("Authorization", adminAuth())
                     .sendJsonObject(new JsonObject()
                         .put("operatorCode", "LOCAL-B").put("operatorName", "Local B").put("isLocal", true));
             })
             .compose(resp -> {
                 ctx.verify(() -> assertEquals(200, resp.statusCode(), resp.bodyAsString()));
                 return webClient.get("/api/operators/LOCAL-A")
-                    .putHeader("X-User-Role", "ADMIN")
+                    .putHeader("Authorization", adminAuth())
                     .send();
             })
             .compose(resp -> {
                 ctx.verify(() -> assertEquals(false, resp.bodyAsJsonObject().getBoolean("isLocal")));
                 return webClient.get("/api/operators/LOCAL-B")
-                    .putHeader("X-User-Role", "ADMIN")
+                    .putHeader("Authorization", adminAuth())
                     .send();
             })
             .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
@@ -592,7 +584,7 @@ class ManagementApiTest {
             .put("username", "noc1").put("password", "password123")
             .put("roles", new JsonArray().add("USER")).put("displayName", "Noc One");
         webClient.post("/api/users")
-            .putHeader("X-User-Role", "ADMIN").putHeader("X-User-Id", "tester")
+            .putHeader("Authorization", adminAuth())
             .sendJsonObject(create)
             .compose(resp -> {
                 ctx.verify(() -> {
@@ -603,7 +595,7 @@ class ManagementApiTest {
                     assertEquals(new JsonArray().add("USER"), body.getJsonArray("roles"));
                 });
                 return webClient.get("/api/users")
-                    .putHeader("X-User-Role", "ADMIN").send();
+                    .putHeader("Authorization", adminAuth()).send();
             })
             .compose(resp -> {
                 ctx.verify(() -> {
@@ -613,14 +605,14 @@ class ManagementApiTest {
                     assertTrue(noc1.getBoolean("isActive"));
                 });
                 return webClient.put("/api/users/noc1")
-                    .putHeader("X-User-Role", "ADMIN").putHeader("X-User-Id", "tester")
+                    .putHeader("Authorization", adminAuth())
                     .sendJsonObject(new JsonObject()
                         .put("roles", new JsonArray().add("MANAGER")).put("isActive", false));
             })
             .compose(resp -> {
                 ctx.verify(() -> assertEquals(200, resp.statusCode(), resp.bodyAsString()));
                 return webClient.get("/api/users")
-                    .putHeader("X-User-Role", "ADMIN").send();
+                    .putHeader("Authorization", adminAuth()).send();
             })
             .compose(resp -> {
                 ctx.verify(() -> {
@@ -647,12 +639,12 @@ class ManagementApiTest {
     @Test
     void createUserValidation(VertxTestContext ctx) {
         webClient.post("/api/users")
-            .putHeader("X-User-Role", "ADMIN").putHeader("X-User-Id", "tester")
+            .putHeader("Authorization", adminAuth())
             .sendJsonObject(new JsonObject().put("username", "noc2").put("password", "password123"))
             .compose(resp -> {
                 ctx.verify(() -> assertEquals(400, resp.statusCode(), resp.bodyAsString()));
                 return webClient.post("/api/users")
-                    .putHeader("X-User-Role", "ADMIN").putHeader("X-User-Id", "tester")
+                    .putHeader("Authorization", adminAuth())
                     .sendJsonObject(new JsonObject().put("username", "noc2").put("password", "short")
                         .put("roles", new JsonArray().add("USER")));
             })
@@ -668,12 +660,12 @@ class ManagementApiTest {
             .put("username", "noc3").put("password", "password123")
             .put("roles", new JsonArray().add("USER"));
         webClient.post("/api/users")
-            .putHeader("X-User-Role", "ADMIN").putHeader("X-User-Id", "tester")
+            .putHeader("Authorization", adminAuth())
             .sendJsonObject(body)
             .compose(resp -> {
                 ctx.verify(() -> assertEquals(200, resp.statusCode(), resp.bodyAsString()));
                 return webClient.post("/api/users")
-                    .putHeader("X-User-Role", "ADMIN").putHeader("X-User-Id", "tester")
+                    .putHeader("Authorization", adminAuth())
                     .sendJsonObject(body);
             })
             .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
@@ -704,13 +696,146 @@ class ManagementApiTest {
     @Test
     void localSettingsReturnsPublicBaseUrl(VertxTestContext ctx) {
         webClient.get("/api/settings/local")
-            .putHeader("X-User-Role", "ADMIN")
+            .putHeader("Authorization", adminAuth())
             .send()
             .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
                 assertEquals(200, resp.statusCode(), resp.bodyAsString());
                 assertTrue(resp.bodyAsJsonObject().containsKey("publicBaseUrl"));
                 ctx.completeNow();
             })));
+    }
+
+    @Test
+    void legacyRoleHeaderNoLongerAuthenticates(VertxTestContext ctx) {
+        webClient.post("/api/operators")
+            .putHeader("X-User-Role", "ADMIN")
+            .putHeader("X-User-Id", "attacker")
+            .sendJsonObject(new JsonObject().put("operatorCode", "EVIL").put("operatorName", "Evil"))
+            .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
+                assertEquals(401, resp.statusCode());
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void tokenSignedWithOtherSecretRejected(VertxTestContext ctx) {
+        String forged = new JwtService("attacker-chosen-secret-attacker-chosen")
+            .issue(TEST_ADMIN, java.util.List.of("ADMIN"), Duration.ofMinutes(5));
+        webClient.get("/api/operators")
+            .putHeader("Authorization", "Bearer " + forged)
+            .send()
+            .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
+                assertEquals(401, resp.statusCode());
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void unsignedAlgNoneTokenRejected(VertxTestContext ctx) {
+        java.util.Base64.Encoder b64 = java.util.Base64.getUrlEncoder().withoutPadding();
+        String header = b64.encodeToString("{\"alg\":\"none\",\"typ\":\"JWT\"}".getBytes());
+        String payload = b64.encodeToString(new JsonObject().put("sub", TEST_ADMIN)
+            .put("roles", new JsonArray().add("ADMIN"))
+            .put("exp", System.currentTimeMillis() / 1000 + 600).encode().getBytes());
+        webClient.get("/api/operators")
+            .putHeader("Authorization", "Bearer " + header + "." + payload + ".")
+            .send()
+            .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
+                assertEquals(401, resp.statusCode());
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void deactivatedUserTokenStopsWorkingImmediately(VertxTestContext ctx) {
+        seedUser("leaver", "leaver-password", "MANAGER")
+            .compose(v -> login("leaver", "leaver-password"))
+            .compose(token -> pool.query("UPDATE np_users SET is_active = FALSE WHERE username = 'leaver'").execute()
+                .compose(v -> webClient.get("/api/operators").putHeader("Authorization", "Bearer " + token).send()))
+            .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
+                assertEquals(401, resp.statusCode());
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void revokedRoleTakesEffectBeforeTokenExpiry(VertxTestContext ctx) {
+        // token still claims ADMIN, but the database now says USER only
+        seedUser("demoted", "demoted-password", "USER")
+            .compose(v -> webClient.post("/api/operators")
+                .putHeader("Authorization", bearer("demoted", "ADMIN"))
+                .sendJsonObject(new JsonObject().put("operatorCode", "OP66").put("operatorName", "Six")))
+            .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
+                assertEquals(403, resp.statusCode());
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void managerCannotCreateLocalOperator(VertxTestContext ctx) {
+        seedUser("mgr2", "manager-password", "MANAGER")
+            .compose(v -> login("mgr2", "manager-password"))
+            .compose(token -> webClient.post("/api/operators")
+                .putHeader("Authorization", "Bearer " + token)
+                .sendJsonObject(new JsonObject().put("operatorCode", "OWN").put("operatorName", "Takeover")
+                    .put("isLocal", true)))
+            .compose(resp -> {
+                ctx.verify(() -> assertEquals(403, resp.statusCode(), resp.bodyAsString()));
+                return pool.query("SELECT COUNT(*) AS c FROM np_operators WHERE operator_code = 'OWN'").execute();
+            })
+            .onComplete(ctx.succeeding(rows -> ctx.verify(() -> {
+                assertEquals(0L, rows.iterator().next().getLong("c"));
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void malformedJsonBodyIsBadRequest(VertxTestContext ctx) {
+        webClient.post("/api/operators")
+            .putHeader("Authorization", adminAuth())
+            .putHeader("Content-Type", "application/json")
+            .sendBuffer(io.vertx.core.buffer.Buffer.buffer("{not json"))
+            .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
+                assertEquals(400, resp.statusCode(), resp.bodyAsString());
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void nonNumericPagingIsBadRequest(VertxTestContext ctx) {
+        webClient.get("/api/workflows?page=abc")
+            .putHeader("Authorization", adminAuth())
+            .send()
+            .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
+                assertEquals(400, resp.statusCode(), resp.bodyAsString());
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void repeatedBadLoginsAreThrottled(VertxTestContext ctx) {
+        // dedicated account: the throttle is shared by every test in this class
+        JsonObject bad = new JsonObject().put("username", "bruteforced").put("password", "wrong");
+        Future<Integer> chain = seedUser("bruteforced", "correct-password", "USER").map(0);
+        for (int i = 0; i < 5; i++) {
+            chain = chain.compose(x -> webClient.post("/api/auth/login").sendJsonObject(bad).map(r -> r.statusCode()));
+        }
+        chain.compose(last -> webClient.post("/api/auth/login")
+                .sendJsonObject(new JsonObject().put("username", "bruteforced").put("password", "correct-password")))
+            .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
+                // locked even with the right password until the window passes
+                assertEquals(429, resp.statusCode(), resp.bodyAsString());
+                ctx.completeNow();
+            })));
+    }
+
+    /** Real signed token for the seeded ADMIN user — the API re-checks the user in the DB. */
+    private static String adminAuth() {
+        return bearer(TEST_ADMIN, "ADMIN");
+    }
+
+    private static String bearer(String username, String... roles) {
+        return "Bearer " + JwtService.fromEnvironment().issue(username, java.util.List.of(roles), Duration.ofMinutes(10));
     }
 
     private static JsonObject findUser(JsonArray users, String username) {

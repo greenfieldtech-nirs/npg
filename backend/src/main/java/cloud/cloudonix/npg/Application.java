@@ -1,5 +1,6 @@
 package cloud.cloudonix.npg;
 
+import cloud.cloudonix.npg.config.Env;
 import cloud.cloudonix.npg.api.ManagementApiVerticle;
 import cloud.cloudonix.npg.config.DatabaseConfig;
 import cloud.cloudonix.npg.config.MigrationRunner;
@@ -23,13 +24,20 @@ public class Application {
 
     public static void main(String[] args) {
         try {
+            // fail fast on unsafe auth configuration before touching anything else
+            cloud.cloudonix.npg.security.JwtService.fromEnvironment();
+        } catch (IllegalStateException e) {
+            log.error("Refusing to start: " + e.getMessage());
+            System.exit(1);
+        }
+        try {
             MigrationRunner.migrate();
         } catch (Exception e) {
             log.error("Database migration failed, aborting startup", e);
             System.exit(1);
         }
         Vertx vertx = Vertx.vertx();
-        String role = System.getenv().getOrDefault("APP_ROLE", "all");
+        String role = Env.get("APP_ROLE", "all");
         log.info("Starting NPG backend with role: " + role);
 
         Future<Pool> poolFuture = DatabaseConfig.configure(vertx);
@@ -47,7 +55,7 @@ public class Application {
             .compose(client -> {
                 if ("api".equals(role) || "all".equals(role)) {
                     DeploymentOptions options = new DeploymentOptions()
-                        .setConfig(new JsonObject().put("port", Integer.parseInt(System.getenv().getOrDefault("API_PORT", "8080"))));
+                        .setConfig(new JsonObject().put("port", Integer.parseInt(Env.get("API_PORT", "8080"))));
                     return vertx.deployVerticle(ManagementApiVerticle.class, options).map(client);
                 }
                 return Future.succeededFuture(client);
@@ -56,8 +64,8 @@ public class Application {
                 if ("inbound".equals(role) || "all".equals(role)) {
                     DeploymentOptions options = new DeploymentOptions()
                         .setConfig(new JsonObject()
-                            .put("port", Integer.parseInt(System.getenv().getOrDefault("PORT", "8080")))
-                            .put("catalogPath", System.getenv().getOrDefault("CATALOG_PATH", "docs/protocol")));
+                            .put("port", Integer.parseInt(Env.get("PORT", "8080")))
+                            .put("catalogPath", Env.get("CATALOG_PATH", "docs/protocol")));
                     return vertx.deployVerticle(InboundGatewayVerticle.class, options).map(client);
                 }
                 return Future.succeededFuture(client);

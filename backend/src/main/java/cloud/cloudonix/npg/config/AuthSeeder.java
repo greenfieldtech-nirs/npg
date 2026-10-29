@@ -1,5 +1,6 @@
 package cloud.cloudonix.npg.config;
 
+import cloud.cloudonix.npg.config.Env;
 import cloud.cloudonix.npg.security.PasswordService;
 import io.vertx.core.Future;
 import io.vertx.core.impl.logging.Logger;
@@ -17,7 +18,30 @@ public final class AuthSeeder {
     private static final Logger log = LoggerFactory.getLogger(AuthSeeder.class);
     private static final List<String> ROLES = List.of("ADMIN", "MANAGER", "USER");
 
+    static final int MIN_ADMIN_PASSWORD_LENGTH = 12;
+    private static final String DEV_ADMIN_PASSWORD = "admin123";
+
     private AuthSeeder() {
+    }
+
+    /**
+     * Password for the very first admin account. Only consulted when that account does not exist
+     * yet; in production a missing or short NPG_ADMIN_PASSWORD aborts startup rather than seeding
+     * a well-known credential.
+     */
+    static String initialAdminPassword(String configured) {
+        if (configured != null && configured.length() >= MIN_ADMIN_PASSWORD_LENGTH) {
+            return configured;
+        }
+        if (Env.isDevMode()) {
+            if (configured == null) {
+                log.warn("NPG_ADMIN_PASSWORD not set — seeding admin with the dev default password (NPG_ENV=dev/test only)");
+                return DEV_ADMIN_PASSWORD;
+            }
+            return configured;
+        }
+        throw new IllegalStateException("NPG_ADMIN_PASSWORD must be set to at least " + MIN_ADMIN_PASSWORD_LENGTH
+            + " characters to create the initial admin user (set NPG_ENV=dev to use the dev default)");
     }
 
     public static Future<Void> ensureSeeded(Pool pool) {
@@ -29,8 +53,8 @@ public final class AuthSeeder {
                 .mapEmpty());
         }
 
-        String username = System.getenv().getOrDefault("NPG_ADMIN_USERNAME", "admin");
-        String password = System.getenv().getOrDefault("NPG_ADMIN_PASSWORD", "admin123");
+        String username = Env.get("NPG_ADMIN_USERNAME", "admin");
+        String configuredPassword = Env.get("NPG_ADMIN_PASSWORD");
 
         return seeded
             .compose(v -> pool.preparedQuery("SELECT id FROM np_users WHERE username = ?")
@@ -39,8 +63,11 @@ public final class AuthSeeder {
                 if (rows.iterator().hasNext()) {
                     return Future.succeededFuture();
                 }
-                if (!System.getenv().containsKey("NPG_ADMIN_PASSWORD")) {
-                    log.warn("NPG_ADMIN_PASSWORD not set — seeding admin with the default password. Set it in non-dev environments.");
+                String password;
+                try {
+                    password = initialAdminPassword(configuredPassword);
+                } catch (IllegalStateException e) {
+                    return Future.failedFuture(e);
                 }
                 return pool.preparedQuery(
                         "INSERT INTO np_users (username, display_name, password_hash) VALUES (?, ?, ?)")

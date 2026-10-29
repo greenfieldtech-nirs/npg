@@ -48,9 +48,7 @@ export const workflowApi = {
   get: (uuid: string) => api.get<Workflow>(`/workflows/${uuid}`).then(r => r.data),
   getEvents: (uuid: string) => api.get<WorkflowEvent[]>(`/workflows/${uuid}/events`).then(r => r.data),
   manualTransition: (uuid: string, toState: string, reason: string) =>
-    api.post(`/workflows/${uuid}/manual-transition`, { toState, reason }, {
-      headers: { 'X-User-Role': 'ADMIN', 'X-User-Id': 'console-user' }
-    })
+    api.post(`/workflows/${uuid}/manual-transition`, { toState, reason })
 }
 
 export const messageApi = {
@@ -66,47 +64,32 @@ export const messageApi = {
   }) => api.get<Message[]>('/messages', { params }).then(r => r.data),
   get: (uuid: string) => api.get<Message>(`/messages/${uuid}`).then(r => r.data),
   getPair: (uuid: string) => api.get<MessagePair>(`/messages/${uuid}/pair`).then(r => r.data),
-  getXml: (uuid: string) => api.get<string>(`/messages/${uuid}/xml`, {
-    headers: { 'X-User-Id': 'console-user' },
-    responseType: 'text'
-  }).then(r => r.data)
+  getXml: (uuid: string) => api.get<string>(`/messages/${uuid}/xml`, { responseType: 'text' }).then(r => r.data)
 }
 
 export const operatorApi = {
   list: () => api.get<Operator[]>('/operators').then(r => r.data),
   get: (code: string) => api.get<Operator>(`/operators/${code}`).then(r => r.data),
   markDown: (code: string, reason: string) =>
-    api.post(`/operators/${code}/mark-down`, { reason }, {
-      headers: { 'X-User-Role': 'ADMIN', 'X-User-Id': 'console-user' }
-    }),
+    api.post(`/operators/${code}/mark-down`, { reason }),
   create: (data: { operatorCode: string; operatorName: string; licenseType?: string; isLocal?: boolean; reason: string }) =>
-    api.post<Operator>('/operators', data, {
-      headers: { 'X-User-Role': 'ADMIN', 'X-User-Id': 'console-user' }
-    }).then(r => r.data),
+    api.post<Operator>('/operators', data).then(r => r.data),
   update: (code: string, data: { operatorName?: string; licenseType?: string; contactName?: string; contactPhone?: string; contactEmail?: string; isActive?: boolean; isLocal?: boolean; reason: string }) =>
-    api.put<Operator>(`/operators/${code}`, data, {
-      headers: { 'X-User-Role': 'ADMIN', 'X-User-Id': 'console-user' }
-    }).then(r => r.data)
+    api.put<Operator>(`/operators/${code}`, data).then(r => r.data)
 }
 
 export const endpointApi = {
   list: (code: string) => api.get<OperatorEndpoint[]>(`/operators/${code}/endpoints`).then(r => r.data),
   create: (code: string, data: Partial<OperatorEndpoint> & { endpointType: string; endpointUrl: string }) =>
-    api.post<OperatorEndpoint>(`/operators/${code}/endpoints`, data, {
-      headers: { 'X-User-Role': 'ADMIN', 'X-User-Id': 'console-user' }
-    }).then(r => r.data),
+    api.post<OperatorEndpoint>(`/operators/${code}/endpoints`, data).then(r => r.data),
   remove: (code: string, id: number) =>
-    api.delete(`/operators/${code}/endpoints/${id}`, {
-      headers: { 'X-User-Role': 'ADMIN', 'X-User-Id': 'console-user' }
-    })
+    api.delete(`/operators/${code}/endpoints/${id}`)
 }
 
 export const manualTaskApi = {
   list: (status?: string) => api.get<ManualTask[]>('/manual-tasks', { params: { status } }).then(r => r.data),
   resolve: (uuid: string, resolution: string) =>
-    api.post(`/manual-tasks/${uuid}/resolve`, { resolution }, {
-      headers: { 'X-User-Role': 'ADMIN', 'X-User-Id': 'console-user' }
-    })
+    api.post(`/manual-tasks/${uuid}/resolve`, { resolution })
 }
 
 export const userApi = {
