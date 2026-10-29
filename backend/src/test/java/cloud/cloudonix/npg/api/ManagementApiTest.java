@@ -89,17 +89,9 @@ class ManagementApiTest {
     @BeforeEach
     void cleanTables(VertxTestContext ctx) {
         // ponytail: DELETE not TRUNCATE — pool connections vary, per-session FK_CHECKS toggles are unreliable
-        pool.query("DELETE FROM np_timers").execute()
-            .compose(v -> pool.query("DELETE FROM np_workflow_events").execute())
-            .compose(v -> pool.query("DELETE FROM np_manual_tasks").execute())
-            .compose(v -> pool.query("DELETE FROM np_audit_events").execute())
-            .compose(v -> pool.query("DELETE FROM np_inbox").execute())
-            .compose(v -> pool.query("DELETE FROM np_outbox").execute())
-            .compose(v -> pool.query("DELETE FROM np_workflows").execute())
-            .compose(v -> pool.query("DELETE FROM np_messages").execute())
-            .compose(v -> pool.query("DELETE FROM np_numbers").execute())
-            .compose(v -> pool.query("DELETE FROM np_number_ownership_history").execute())
+        TestDatabase.clean(pool)
             .compose(v -> pool.query("DELETE FROM np_operator_endpoints").execute())
+            .compose(v -> pool.query("DELETE FROM np_operator_status_events").execute())
             .compose(v -> pool.query("DELETE FROM np_operators").execute())
             .compose(v -> pool.query("DELETE FROM np_user_roles").execute())
             .compose(v -> pool.query("DELETE FROM np_users").execute())
@@ -895,6 +887,60 @@ class ManagementApiTest {
 
     private static Future<Integer> statusOf(Future<?> attempt) {
         return attempt.map(ok -> 200).recover(e -> Future.succeededFuture(((ApiError) e).status));
+    }
+
+    @Test
+    void portInBatchSplitsIntoOneWorkflowPerNumber(VertxTestContext ctx) {
+        pool.query("INSERT INTO np_operators (operator_code, operator_name, is_local) VALUES ('LOCX', 'Local', TRUE), ('DONX', 'Donor', FALSE)").execute()
+            .compose(v -> webClient.post("/api/porting").putHeader("Authorization", adminAuth())
+                .sendJsonObject(new JsonObject().put("phoneNumbers", new JsonArray().add("0812345670").add("0812345671"))
+                    .put("numberType", "FIXED").put("donorOperatorCode", "DONX").put("identificationValue", "123456782")))
+            .compose(resp -> {
+                ctx.verify(() -> {
+                    assertEquals(200, resp.statusCode(), resp.bodyAsString());
+                    JsonArray results = resp.bodyAsJsonObject().getJsonArray("results");
+                    assertEquals(2, results.size());
+                    assertNotNull(results.getJsonObject(0).getString("workflowUuid"));
+                });
+                // the same number again while its port-in is open
+                return webClient.post("/api/porting").putHeader("Authorization", adminAuth())
+                    .sendJsonObject(new JsonObject().put("phoneNumber", "0812345670").put("numberType", "FIXED")
+                        .put("donorOperatorCode", "DONX"));
+            })
+            .compose(resp -> {
+                ctx.verify(() -> assertEquals(409, resp.statusCode(), resp.bodyAsString()));
+                return pool.query("SELECT workflow_uuid FROM np_workflows WHERE phone_number = '0812345670'").execute();
+            })
+            .compose(rows -> webClient.post("/api/workflows/" + rows.iterator().next().getString("workflow_uuid") + "/cancel")
+                .putHeader("Authorization", adminAuth()).sendJsonObject(new JsonObject().put("reason", "too early")))
+            .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
+                assertEquals(409, resp.statusCode(), "cannot cancel before the Request is approved: " + resp.bodyAsString());
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void portInValidatesInputAndRole(VertxTestContext ctx) {
+        seedUser("viewer", "viewer-password", "USER")
+            .compose(v -> webClient.post("/api/porting").putHeader("Authorization", bearer("viewer", "USER"))
+                .sendJsonObject(new JsonObject().put("phoneNumber", "0812345670").put("numberType", "FIXED")
+                    .put("donorOperatorCode", "OP01")))
+            .compose(resp -> {
+                ctx.verify(() -> assertEquals(403, resp.statusCode()));
+                return webClient.post("/api/porting").putHeader("Authorization", adminAuth())
+                    .sendJsonObject(new JsonObject().put("phoneNumber", "12345").put("numberType", "FIXED")
+                        .put("donorOperatorCode", "OP01"));
+            })
+            .compose(resp -> {
+                ctx.verify(() -> assertEquals(400, resp.statusCode(), resp.bodyAsString()));
+                return webClient.post("/api/porting").putHeader("Authorization", adminAuth())
+                    .sendJsonObject(new JsonObject().put("phoneNumber", "0812345670").put("numberType", "SATELLITE")
+                        .put("donorOperatorCode", "OP01"));
+            })
+            .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
+                assertEquals(400, resp.statusCode(), resp.bodyAsString());
+                ctx.completeNow();
+            })));
     }
 
     /** Real signed token for the seeded ADMIN user — the API re-checks the user in the DB. */

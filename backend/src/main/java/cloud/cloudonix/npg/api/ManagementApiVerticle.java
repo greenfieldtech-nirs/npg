@@ -15,6 +15,9 @@ import cloud.cloudonix.npg.repository.CachedOperatorRepository;
 import cloud.cloudonix.npg.repository.OperatorRepository;
 import cloud.cloudonix.npg.service.CacheService;
 import cloud.cloudonix.npg.service.PubSubService;
+import cloud.cloudonix.npg.workflow.WorkflowServices;
+import cloud.cloudonix.npg.workflow.porting.PortOutPolicy;
+import cloud.cloudonix.npg.workflow.porting.PortingService;
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.Future;
 import io.vertx.core.Promise;
@@ -48,6 +51,7 @@ public class ManagementApiVerticle extends AbstractVerticle {
     private ManualTaskApiHandler manualTaskApiHandler;
     private NumberApiHandler numberApiHandler;
     private UserManagementApiHandler userManagementApiHandler;
+    private PortingApiHandler portingApiHandler;
 
     @Override
     public void start(Promise<Void> startPromise) {
@@ -76,6 +80,9 @@ public class ManagementApiVerticle extends AbstractVerticle {
                 manualTaskApiHandler = new ManualTaskApiHandler(pool);
                 numberApiHandler = new NumberApiHandler(pool);
                 userManagementApiHandler = new UserManagementApiHandler(pool);
+                WorkflowServices services = WorkflowServices.create(vertx, pool, mongoFuture.result(),
+                    Env.get("CATALOG_PATH", "docs/protocol"));
+                portingApiHandler = new PortingApiHandler(new PortingService(services, PortOutPolicy.fromEnvironment()));
                 return xmlAuditService.ensureIndexes();
             })
             .compose(v -> {
@@ -150,6 +157,26 @@ public class ManagementApiVerticle extends AbstractVerticle {
                     ctx.get("actorId"),
                     remoteIp(ctx)));
             });
+
+        router.post("/api/porting")
+            .handler(guard.requireAny("ADMIN", "MANAGER"))
+            .handler(ctx -> handleJson(ctx, portingApiHandler.start(jsonBody(ctx), ctx.get("actorId"), remoteIp(ctx))));
+        router.post("/api/workflows/:workflowUuid/port-time")
+            .handler(guard.requireAny("ADMIN", "MANAGER"))
+            .handler(ctx -> handleEmpty(ctx, portingApiHandler.updatePortTime(ctx.pathParam("workflowUuid"), jsonBody(ctx),
+                ctx.get("actorId"), remoteIp(ctx))));
+        router.post("/api/workflows/:workflowUuid/cancel")
+            .handler(guard.requireAny("ADMIN", "MANAGER"))
+            .handler(ctx -> handleEmpty(ctx, portingApiHandler.cancel(ctx.pathParam("workflowUuid"), jsonBody(ctx),
+                ctx.get("actorId"), remoteIp(ctx))));
+        router.post("/api/workflows/:workflowUuid/cancel-publication")
+            .handler(guard.requireAny("ADMIN", "MANAGER"))
+            .handler(ctx -> handleEmpty(ctx, portingApiHandler.cancelPublication(ctx.pathParam("workflowUuid"), jsonBody(ctx),
+                ctx.get("actorId"), remoteIp(ctx))));
+        router.post("/api/workflows/:workflowUuid/decision")
+            .handler(guard.requireAny("ADMIN", "MANAGER"))
+            .handler(ctx -> handleEmpty(ctx, portingApiHandler.decide(ctx.pathParam("workflowUuid"), jsonBody(ctx),
+                ctx.get("actorId"), remoteIp(ctx))));
 
         router.get("/api/messages")
             .handler(guard.authenticated())
@@ -401,6 +428,15 @@ public class ManagementApiVerticle extends AbstractVerticle {
         if (err instanceof ApiError apiError) {
             status = apiError.status;
             body = new JsonObject().put("error", apiError.getMessage());
+        } else if (err instanceof cloud.cloudonix.npg.workflow.BusinessRuleException rule) {
+            status = rule.status();
+            body = new JsonObject().put("error", rule.getMessage());
+        } else if (err instanceof cloud.cloudonix.npg.workflow.WorkflowEngine.WorkflowNotFoundException) {
+            status = 404;
+            body = new JsonObject().put("error", "Workflow not found");
+        } else if (err instanceof cloud.cloudonix.npg.workflow.WorkflowEngine.IllegalTransitionException) {
+            status = 409;
+            body = new JsonObject().put("error", err.getMessage());
         } else {
             status = 500;
             String errorId = java.util.UUID.randomUUID().toString();
