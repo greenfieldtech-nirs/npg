@@ -88,7 +88,7 @@ public class AuthApiHandler {
         }
         return userRepository.findByUsername(username).compose(user -> {
             String accountKey = user != null ? "id:" + user.id() : null;
-            boolean countsAgainstAccount = user != null && !deviceTrust.isTrusted(deviceToken, user.id());
+            boolean countsAgainstAccount = user != null && !deviceTrust.isTrusted(deviceToken, user.id(), user.passwordHash());
             if (countsAgainstAccount && !perAccount.tryAcquire(accountKey)) {
                 return Future.failedFuture(tooManyAttempts());
             }
@@ -117,7 +117,7 @@ public class AuthApiHandler {
                             new JsonObject()
                                 .put("token", jwtService.issue(user.username(), roles, TOKEN_TTL))
                                 .put("user", userPayload(user.username(), user.displayName(), roles)),
-                            deviceTrust.issue(user.id())));
+                            deviceTrust.issue(user.id(), user.passwordHash())));
                 });
         });
     }

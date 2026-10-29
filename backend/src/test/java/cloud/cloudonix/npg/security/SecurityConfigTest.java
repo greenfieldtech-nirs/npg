@@ -174,22 +174,32 @@ class SecurityConfigTest {
         MutableClock clock = new MutableClock();
         JwtService signer = new JwtService("z".repeat(40));
         DeviceTrust trust = new DeviceTrust(signer, Duration.ofDays(30), clock);
-        String token = trust.issue(7L);
-        assertTrue(trust.isTrusted(token, 7L));
-        assertFalse(trust.isTrusted(token, 8L), "token for another account");
-        assertFalse(trust.isTrusted(token.replace("v1.7.", "v1.8."), 8L), "re-targeted token");
-        assertFalse(new DeviceTrust(new JwtService("q".repeat(40)), Duration.ofDays(30), clock).isTrusted(token, 7L),
+        String hash = "$2a$10$storedhash";
+        String token = trust.issue(7L, hash);
+        assertTrue(trust.isTrusted(token, 7L, hash));
+        assertFalse(trust.isTrusted(token, 8L, hash), "token for another account");
+        assertFalse(trust.isTrusted(token.replace("v1.7.", "v1.8."), 8L, hash), "re-targeted token");
+        assertFalse(new DeviceTrust(new JwtService("q".repeat(40)), Duration.ofDays(30), clock).isTrusted(token, 7L, hash),
             "signed with another secret");
-        assertFalse(trust.isTrusted("garbage", 7L));
-        assertFalse(trust.isTrusted(null, 7L));
+        assertFalse(trust.isTrusted("garbage", 7L, hash));
+        assertFalse(trust.isTrusted(null, 7L, hash));
         clock.advance(Duration.ofDays(31));
-        assertFalse(trust.isTrusted(token, 7L), "expired");
+        assertFalse(trust.isTrusted(token, 7L, hash), "expired");
+    }
+
+    @Test
+    void passwordChangeRevokesDeviceTokens() {
+        DeviceTrust trust = new DeviceTrust(new JwtService("z".repeat(40)), Duration.ofDays(30), Clock.systemUTC());
+        String token = trust.issue(7L, "$2a$10$oldhash");
+        assertTrue(trust.isTrusted(token, 7L, "$2a$10$oldhash"));
+        assertFalse(trust.isTrusted(token, 7L, "$2a$10$newhash"));
+        assertFalse(token.contains(DeviceTrust.credentialFingerprint("$2a$10$oldhash")), "fingerprint is never disclosed");
     }
 
     @Test
     void deviceTrustSignatureCannotBeReplayedAsJwt() {
         JwtService signer = new JwtService("z".repeat(40));
-        String token = new DeviceTrust(signer, Duration.ofDays(1), Clock.systemUTC()).issue(1L);
+        String token = new DeviceTrust(signer, Duration.ofDays(1), Clock.systemUTC()).issue(1L, "h");
         assertTrue(signer.verify(token).isEmpty());
     }
 

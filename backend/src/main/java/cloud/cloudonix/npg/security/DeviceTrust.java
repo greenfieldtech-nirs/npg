@@ -1,5 +1,8 @@
 package cloud.cloudonix.npg.security;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Duration;
@@ -11,7 +14,9 @@ import java.util.Base64;
  * per-account limit, so attackers spraying the account cannot lock its owner out. Unlike an IP
  * address, the token is a secret only the owner's browser holds.
  *
- * <p>Format: {@code v1.<accountId>.<expiryEpochSeconds>.<nonce>.<hmac>}.
+ * <p>Format: {@code v1.<accountId>.<expiryEpochSeconds>.<nonce>.<hmac>}. The HMAC also covers a
+ * fingerprint of the account's current password hash (never written into the cookie), so changing
+ * the password revokes every device token issued before.
  */
 public class DeviceTrust {
 
@@ -33,16 +38,27 @@ public class DeviceTrust {
         return ttl;
     }
 
-    public String issue(long accountId) {
+    /** Short digest of the stored password hash; changes whenever the password changes. */
+    public static String credentialFingerprint(String passwordHash) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                .digest(String.valueOf(passwordHash).getBytes(StandardCharsets.UTF_8));
+            return Base64.getUrlEncoder().withoutPadding().encodeToString(digest);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 unavailable", e);
+        }
+    }
+
+    public String issue(long accountId, String passwordHash) {
         byte[] nonce = new byte[12];
         random.nextBytes(nonce);
         long expiry = clock.millis() / 1000 + ttl.getSeconds();
         String payload = "v1." + accountId + "." + expiry + "."
             + Base64.getUrlEncoder().withoutPadding().encodeToString(nonce);
-        return payload + "." + signer.signDetached(PURPOSE, payload);
+        return payload + "." + signer.signDetached(PURPOSE, signedInput(payload, passwordHash));
     }
 
-    public boolean isTrusted(String token, long accountId) {
+    public boolean isTrusted(String token, long accountId, String passwordHash) {
         if (token == null) {
             return false;
         }
@@ -51,7 +67,7 @@ public class DeviceTrust {
             return false;
         }
         String payload = String.join(".", parts[0], parts[1], parts[2], parts[3]);
-        if (!signer.verifyDetached(PURPOSE, payload, parts[4])) {
+        if (!signer.verifyDetached(PURPOSE, signedInput(payload, passwordHash), parts[4])) {
             return false;
         }
         try {
@@ -59,5 +75,9 @@ public class DeviceTrust {
         } catch (NumberFormatException e) {
             return false;
         }
+    }
+
+    private static String signedInput(String payload, String passwordHash) {
+        return payload + "|" + credentialFingerprint(passwordHash);
     }
 }
