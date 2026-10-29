@@ -1,37 +1,37 @@
 package cloud.cloudonix.npg.workflow.handler;
 
-import cloud.cloudonix.npg.audit.XmlAuditService;
-import cloud.cloudonix.npg.number.NumberOwnershipService;
-import cloud.cloudonix.npg.protocol.ProtocolCatalogLoader;
+import cloud.cloudonix.npg.repository.ManualTaskRepository;
 import cloud.cloudonix.npg.worker.PermanentProcessingException;
-import cloud.cloudonix.npg.workflow.WorkflowEngine;
+import cloud.cloudonix.npg.workflow.StateMachines;
+import cloud.cloudonix.npg.workflow.Workflow;
+import cloud.cloudonix.npg.workflow.WorkflowServices;
 import io.vertx.core.Future;
-import io.vertx.sqlclient.Pool;
+import io.vertx.core.json.JsonObject;
 import io.vertx.sqlclient.Row;
 import io.vertx.sqlclient.SqlConnection;
 
 import java.util.HashMap;
 import java.util.Map;
 
+/** Routes inbound messages by message family and timers by workflow type. */
 public class WorkflowHandlerRegistry {
 
+    private final WorkflowServices services;
     private final Map<String, WorkflowHandler> handlers = new HashMap<>();
 
-    public WorkflowHandlerRegistry(Pool pool, XmlAuditService xmlAuditService,
-                                   ProtocolCatalogLoader catalogLoader, WorkflowEngine workflowEngine,
-                                   NumberOwnershipService ownershipService) {
-        handlers.put("PORTING", new PortingWorkflowHandler(pool, xmlAuditService, catalogLoader,
-            workflowEngine, ownershipService));
-        handlers.put("PUBLICATION", new PublicationWorkflowHandler());
-        handlers.put("NUMBER_RETURN", new NumberReturnWorkflowHandler());
-        handlers.put("NUMBER_INQUIRY", new InquiryWorkflowHandler());
-        handlers.put("MAINTENANCE", new MaintenanceWorkflowHandler());
-        handlers.put("DATA_SYNCHRONIZATION", new SynchronizationWorkflowHandler());
+    public WorkflowHandlerRegistry(WorkflowServices services) {
+        this.services = services;
+        handlers.put(StateMachines.PORTING, new PortingWorkflowHandler(services));
+        handlers.put(StateMachines.PUBLICATION, new PublicationWorkflowHandler());
+        handlers.put(StateMachines.NUMBER_RETURN, new NumberReturnWorkflowHandler());
+        handlers.put(StateMachines.NUMBER_INQUIRY, new InquiryWorkflowHandler());
+        handlers.put(StateMachines.MAINTENANCE, new MaintenanceWorkflowHandler());
+        handlers.put(StateMachines.DATA_SYNCHRONIZATION, new SynchronizationWorkflowHandler());
     }
 
     public Future<Void> handle(SqlConnection tx, Row inboxItem) {
         String itemType = inboxItem.getString("item_type");
-        String family = resolveFamily(itemType);
+        String family = familyOf(itemType);
         WorkflowHandler handler = family != null ? handlers.get(family) : null;
         if (handler == null) {
             return Future.failedFuture(new PermanentProcessingException("No handler for message type: " + itemType));
@@ -39,16 +39,35 @@ public class WorkflowHandlerRegistry {
         return handler.handle(tx, inboxItem);
     }
 
-    private String resolveFamily(String messageType) {
+    /** Fires a timer for a locked workflow that is still in the state the timer guards. */
+    public Future<Void> onTimer(SqlConnection tx, Workflow workflow, Row timer) {
+        WorkflowHandler handler = handlers.get(workflow.type());
+        Future<Boolean> handled = handler != null ? handler.onTimer(tx, workflow, timer) : Future.succeededFuture(false);
+        return handled.compose(done -> done ? Future.succeededFuture() : escalateTimeout(tx, workflow, timer));
+    }
+
+    /** Generic response timeout: stop and hand the workflow to the NOC (timer matrix: retry_or_manual_review). */
+    private Future<Void> escalateTimeout(SqlConnection tx, Workflow workflow, Row timer) {
+        String timerName = timer.getString("timer_name");
+        JsonObject details = new JsonObject().put("timer", timerName).put("stateWhenExpired", workflow.state());
+        return services.engine().transition(tx, workflow, StateMachines.MANUAL_REVIEW, "TIMER_EXPIRED", null, details, "system")
+            .compose(wf -> new ManualTaskRepository(tx).open(workflow.id(), null, "RESPONSE_TIMEOUT",
+                ManualTaskRepository.SEVERITY_MEDIUM,
+                timerName + " expired while " + workflow.type() + " " + workflow.requestId() + " was in "
+                    + workflow.state() + ". Contact the peer operator, then resume the workflow manually."))
+            .mapEmpty();
+    }
+
+    static String familyOf(String messageType) {
         return switch (messageType) {
             case "Check", "Check_response", "Request", "Request_response", "Update", "Update_response",
                  "Cancel", "Cancel_response", "KD_update", "KD_update_response",
-                 "Execute", "Execute_response" -> "PORTING";
-            case "Publish", "Publish_response", "Cancel_Publish", "Cancel_Publish_response" -> "PUBLICATION";
-            case "Return", "Return_response" -> "NUMBER_RETURN";
-            case "Inquire_number", "Inquire_number_response" -> "NUMBER_INQUIRY";
-            case "Down_system", "Up_system" -> "MAINTENANCE";
-            case "DB_synch_request", "DB_synch_response" -> "DATA_SYNCHRONIZATION";
+                 "Execute", "Execute_response" -> StateMachines.PORTING;
+            case "Publish", "Publish_response", "Cancel_Publish", "Cancel_Publish_response" -> StateMachines.PUBLICATION;
+            case "Return", "Return_response" -> StateMachines.NUMBER_RETURN;
+            case "Inquire_number", "Inquire_number_response" -> StateMachines.NUMBER_INQUIRY;
+            case "Down_system", "Up_system" -> StateMachines.MAINTENANCE;
+            case "DB_synch_request", "DB_synch_response" -> StateMachines.DATA_SYNCHRONIZATION;
             default -> null;
         };
     }

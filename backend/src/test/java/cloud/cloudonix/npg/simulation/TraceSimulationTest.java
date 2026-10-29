@@ -7,13 +7,12 @@ import cloud.cloudonix.npg.audit.XmlTransportMetadata;
 import cloud.cloudonix.npg.config.DatabaseConfig;
 import cloud.cloudonix.npg.config.MongoConfig;
 import cloud.cloudonix.npg.inbound.InboundGatewayService;
-import cloud.cloudonix.npg.number.NumberOwnershipService;
 import cloud.cloudonix.npg.protocol.ProtocolBody;
 import cloud.cloudonix.npg.protocol.ProtocolCatalogLoader;
 import cloud.cloudonix.npg.protocol.ProtocolHeader;
 import cloud.cloudonix.npg.support.TestDatabase;
 import cloud.cloudonix.npg.support.TestMongo;
-import cloud.cloudonix.npg.workflow.WorkflowEngine;
+import cloud.cloudonix.npg.workflow.WorkflowServices;
 import cloud.cloudonix.npg.workflow.handler.WorkflowHandlerRegistry;
 import cloud.cloudonix.npg.xml.SecureXmlParser;
 import cloud.cloudonix.npg.xml.XmlParseResult;
@@ -254,14 +253,14 @@ class TraceSimulationTest {
     }
 
     @Test
-    void checkMessageRegistersNumberAndWorkflow(VertxTestContext ctx) {
+    void checkMessageOpensDonorWorkflowWithoutTouchingOwnership(VertxTestContext ctx) {
         Fixture f = TRACE.get(0);
         Map<String, String> headers = new java.util.HashMap<>(f.headers());
         headers.put("x-np-request-id", "REQ-REG-" + java.util.UUID.randomUUID());
         headers.put("x-np-trx-no", "HL000999000111");
 
-        WorkflowHandlerRegistry registry = new WorkflowHandlerRegistry(pool, xmlAuditService,
-            catalogLoader, new WorkflowEngine(pool), new NumberOwnershipService(pool));
+        WorkflowHandlerRegistry registry = new WorkflowHandlerRegistry(
+            WorkflowServices.create(vertx, pool, xmlAuditService.mongoClient(), "../docs/protocol"));
 
         service.receive(f.xml(), TRANSPORT, headers)
             .compose(ack -> {
@@ -273,25 +272,23 @@ class TraceSimulationTest {
                 return pool.withTransaction(tx -> registry.handle(tx, inboxRow));
             })
             .compose(v -> pool.preparedQuery(
-                "SELECT phone_number, number_type FROM np_numbers WHERE phone_number = ?")
-                .execute(io.vertx.sqlclient.Tuple.of("08XXXXXXX")))
+                    "SELECT current_state, local_role, phone_number, context_json FROM np_workflows WHERE request_id = ?")
+                .execute(io.vertx.sqlclient.Tuple.of(headers.get("x-np-request-id"))))
             .compose(rows -> {
-                assertTrue(rows.iterator().hasNext(), "np_numbers must contain 08XXXXXXX");
-                assertEquals("FIXED", rows.iterator().next().getString("number_type"),
-                    "08XXXXXXX is a fixed/landline number (networkType=F in the trace)");
-                return pool.preparedQuery(
-                    "SELECT current_state FROM np_workflows WHERE request_id = ?")
-                    .execute(io.vertx.sqlclient.Tuple.of(headers.get("x-np-request-id")));
-            })
-            .compose(rows -> {
-                assertTrue(rows.iterator().hasNext(), "np_workflows must contain the workflow");
-                assertEquals("CHECK_SENT", rows.iterator().next().getString("current_state"));
-                return pool.preparedQuery(
-                    "SELECT change_reason FROM np_number_ownership_history WHERE phone_number = ?")
+                assertTrue(rows.iterator().hasNext(), "the Check opens a workflow");
+                Row wf = rows.iterator().next();
+                // the trace's HL asks BZ: as the receiver we are the donor
+                assertEquals("DONOR", wf.getString("local_role"));
+                assertEquals("CHECK_RECEIVED", wf.getString("current_state"));
+                assertEquals("08XXXXXXX", wf.getString("phone_number"));
+                assertEquals("FIXED", new io.vertx.core.json.JsonObject(wf.getValue("context_json").toString())
+                    .getString("numberType"), "networkType=F in the trace");
+                return pool.preparedQuery("SELECT COUNT(*) AS c FROM np_numbers WHERE phone_number = ?")
                     .execute(io.vertx.sqlclient.Tuple.of("08XXXXXXX"));
             })
             .onComplete(ctx.succeeding(rows -> ctx.verify(() -> {
-                assertTrue(rows.iterator().hasNext(), "ownership history must record the registration");
+                assertEquals(0L, rows.iterator().next().getLong("c"),
+                    "an eligibility check must not change number ownership");
                 ctx.completeNow();
             })));
     }

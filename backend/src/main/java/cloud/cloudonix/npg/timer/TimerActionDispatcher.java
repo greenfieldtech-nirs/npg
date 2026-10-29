@@ -1,45 +1,46 @@
 package cloud.cloudonix.npg.timer;
 
 import cloud.cloudonix.npg.workflow.WorkflowEngine;
+import cloud.cloudonix.npg.workflow.handler.WorkflowHandlerRegistry;
 import io.vertx.core.Future;
 import io.vertx.core.json.JsonObject;
 import io.vertx.sqlclient.Row;
+import io.vertx.sqlclient.SqlConnection;
 
+/**
+ * Runs a fired timer's action. The workflow is locked first; if it already left the state the
+ * timer guards (the response arrived, the port was cancelled...) the timer is a no-op. That check
+ * is what makes a timer that fires twice after a crash safe.
+ */
 public class TimerActionDispatcher {
 
-    private final TimerService timerService;
-    private final WorkflowEngine workflowEngine;
+    private final WorkflowEngine engine;
+    private final WorkflowHandlerRegistry registry;
 
-    public TimerActionDispatcher(TimerService timerService, WorkflowEngine workflowEngine) {
-        this.timerService = timerService;
-        this.workflowEngine = workflowEngine;
+    public TimerActionDispatcher(WorkflowEngine engine, WorkflowHandlerRegistry registry) {
+        this.engine = engine;
+        this.registry = registry;
     }
 
-    public Future<Void> dispatch(Row timerRow) {
+    public Future<Void> dispatch(SqlConnection tx, Row timerRow) {
         Long workflowId = timerRow.getLong("workflow_id");
-        String timerType = timerRow.getString("timer_type");
-        JsonObject action = actionJson(timerRow);
-
-        // Idempotency: an illegal transition means the workflow already moved past this point.
-        return workflowEngine.transition(workflowId, "MANUAL_REVIEW", timerType + "_FIRED",
-                null, action, "system")
-            .recover(err -> {
-                if (err.getMessage() != null && err.getMessage().contains("Illegal transition")) {
-                    return Future.succeededFuture();
-                }
-                return Future.failedFuture(err);
-            })
-            .mapEmpty();
+        if (workflowId == null) {
+            return Future.succeededFuture();
+        }
+        String expectedState = actionJson(timerRow).getString("expectedState");
+        return engine.lock(tx, workflowId).compose(wf -> {
+            if (expectedState != null && !expectedState.equals(wf.state())) {
+                return Future.succeededFuture(); // the workflow moved on: nothing to do
+            }
+            return registry.onTimer(tx, wf, timerRow);
+        });
     }
 
-    private JsonObject actionJson(Row row) {
+    static JsonObject actionJson(Row row) {
         Object value = row.getValue("action_json");
         if (value == null) {
             return new JsonObject();
         }
-        if (value instanceof JsonObject jo) {
-            return jo;
-        }
-        return new JsonObject(value.toString());
+        return value instanceof JsonObject jo ? jo : new JsonObject(value.toString());
     }
 }

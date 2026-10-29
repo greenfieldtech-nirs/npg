@@ -1,13 +1,17 @@
 package cloud.cloudonix.npg.timer;
 
-import cloud.cloudonix.npg.config.Env;
 import cloud.cloudonix.npg.config.DatabaseConfig;
-import cloud.cloudonix.npg.workflow.WorkflowEngine;
+import cloud.cloudonix.npg.config.Env;
+import cloud.cloudonix.npg.config.MongoConfig;
+import cloud.cloudonix.npg.workflow.WorkflowServices;
+import cloud.cloudonix.npg.workflow.handler.WorkflowHandlerRegistry;
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.Future;
 import io.vertx.core.Promise;
 import io.vertx.core.impl.logging.Logger;
 import io.vertx.core.impl.logging.LoggerFactory;
+import io.vertx.ext.mongo.MongoClient;
+import io.vertx.sqlclient.Pool;
 
 public class TimerWorkerVerticle extends AbstractVerticle {
 
@@ -19,12 +23,17 @@ public class TimerWorkerVerticle extends AbstractVerticle {
 
     @Override
     public void start(Promise<Void> startPromise) {
-        DatabaseConfig.configure(vertx)
-            .onSuccess(pool -> {
-                TimerService timerService = new TimerService(pool);
-                WorkflowEngine workflowEngine = new WorkflowEngine(pool);
-                TimerActionDispatcher dispatcher = new TimerActionDispatcher(timerService, workflowEngine);
+        Future<Pool> poolFuture = DatabaseConfig.configure(vertx);
+        Future<MongoClient> mongoFuture = MongoConfig.configure(vertx);
+        Future.all(poolFuture, mongoFuture)
+            .onSuccess(result -> {
+                Pool pool = poolFuture.result();
+                WorkflowServices services = WorkflowServices.create(vertx, pool, mongoFuture.result(),
+                    Env.get("CATALOG_PATH", "docs/protocol"));
+                TimerActionDispatcher dispatcher = new TimerActionDispatcher(services.engine(),
+                    new WorkflowHandlerRegistry(services));
                 TimerProcessor processor = new TimerProcessor(pool, dispatcher::dispatch);
+                TimerService timerService = new TimerService(pool);
 
                 String workerId = Env.get("WORKER_ID", "timer-worker-" + System.currentTimeMillis());
                 int batchSize = Env.getInt("QUEUE_CLAIM_BATCH_SIZE", 10);

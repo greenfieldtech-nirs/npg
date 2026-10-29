@@ -36,7 +36,7 @@ class PortingWorkflowTest {
         DatabaseConfig.configure(vertx)
             .onComplete(ctx.succeeding(p -> {
                 pool = p;
-                engine = new WorkflowEngine(p);
+                engine = new WorkflowEngine();
                 ownershipService = new NumberOwnershipService(p);
                 ctx.completeNow();
             }));

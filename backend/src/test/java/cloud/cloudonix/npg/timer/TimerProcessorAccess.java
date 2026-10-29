@@ -4,7 +4,7 @@ import io.vertx.core.Future;
 import io.vertx.sqlclient.Pool;
 import io.vertx.sqlclient.Row;
 
-import java.util.function.Function;
+import java.util.function.BiFunction;
 
 /** Test bridge exposing {@link TimerProcessor} limits to tests in other packages. */
 public final class TimerProcessorAccess {
@@ -13,7 +13,7 @@ public final class TimerProcessorAccess {
 
     private final TimerProcessor processor;
 
-    public TimerProcessorAccess(Pool pool, Function<Row, Future<Void>> action) {
+    public TimerProcessorAccess(Pool pool, BiFunction<io.vertx.sqlclient.SqlConnection, Row, Future<Void>> action) {
         this.processor = new TimerProcessor(pool, action);
     }
 

@@ -1,13 +1,10 @@
 package cloud.cloudonix.npg.worker;
 
-import cloud.cloudonix.npg.audit.XmlAuditService;
 import cloud.cloudonix.npg.config.DatabaseConfig;
 import cloud.cloudonix.npg.config.Env;
 import cloud.cloudonix.npg.config.MongoConfig;
-import cloud.cloudonix.npg.number.NumberOwnershipService;
-import cloud.cloudonix.npg.protocol.ProtocolCatalogLoader;
 import cloud.cloudonix.npg.repository.InboxRepository;
-import cloud.cloudonix.npg.workflow.WorkflowEngine;
+import cloud.cloudonix.npg.workflow.WorkflowServices;
 import cloud.cloudonix.npg.workflow.handler.WorkflowHandlerRegistry;
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.Future;
@@ -35,14 +32,9 @@ public class InboxWorkerVerticle extends AbstractVerticle {
         Future.all(poolFuture, mongoFuture)
             .onSuccess(result -> {
                 Pool pool = poolFuture.result();
-                XmlAuditService xmlAuditService = new XmlAuditService(mongoFuture.result());
-                ProtocolCatalogLoader catalogLoader = new ProtocolCatalogLoader(vertx, catalogPath);
-                WorkflowEngine workflowEngine = new WorkflowEngine(pool);
-                NumberOwnershipService ownershipService = new NumberOwnershipService(pool);
-
+                WorkflowServices services = WorkflowServices.create(vertx, pool, mongoFuture.result(), catalogPath);
                 InboxRepository inboxRepository = new InboxRepository(pool);
-                WorkflowHandlerRegistry registry = new WorkflowHandlerRegistry(pool, xmlAuditService,
-                    catalogLoader, workflowEngine, ownershipService);
+                WorkflowHandlerRegistry registry = new WorkflowHandlerRegistry(services);
                 String workerId = Env.get("WORKER_ID", "worker-" + System.currentTimeMillis());
                 int batchSize = Env.getInt("QUEUE_CLAIM_BATCH_SIZE", 10);
                 int lockSeconds = Env.getInt("QUEUE_LOCK_SECONDS", 60);

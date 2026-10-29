@@ -14,7 +14,7 @@ public class WorkflowApiHandler {
 
     public WorkflowApiHandler(Pool pool) {
         this.pool = pool;
-        this.workflowEngine = new WorkflowEngine(pool);
+        this.workflowEngine = new WorkflowEngine();
     }
 
     public Future<JsonArray> searchWorkflows(String phoneNumber, String state, int page, int size) {
@@ -53,16 +53,20 @@ public class WorkflowApiHandler {
             .map(RowJson::rowsToJsonArray);
     }
 
-    public Future<Void> manualTransition(String workflowUuid, String toState, String reason, String actorId) {
-        return pool.preparedQuery("SELECT id FROM np_workflows WHERE workflow_uuid = ?")
-            .execute(Tuple.of(workflowUuid))
-            .compose(rows -> {
-                if (!rows.iterator().hasNext()) {
-                    return Future.failedFuture("Workflow not found");
-                }
-                Long workflowId = rows.iterator().next().getLong("id");
-                return workflowEngine.manualTransition(workflowId, toState, "MANUAL_TRANSITION",
-                    new JsonObject().put("reason", reason), actorId);
-            });
+    public Future<Void> manualTransition(String workflowUuid, String toState, String reason, String actorId,
+                                         String remoteIp) {
+        if (toState == null || toState.isBlank()) {
+            return Future.failedFuture(new ApiError(400, "toState is required"));
+        }
+        if (reason == null || reason.isBlank()) {
+            return Future.failedFuture(new ApiError(400, "A reason is required for manual transitions"));
+        }
+        return pool.withTransaction(tx -> workflowEngine.lockByUuid(tx, workflowUuid)
+                .compose(wf -> workflowEngine.manualTransition(tx, wf, toState, reason, actorId, remoteIp)))
+            .<Void>mapEmpty()
+            .recover(err -> Future.failedFuture(
+                err instanceof WorkflowEngine.WorkflowNotFoundException ? new ApiError(404, "Workflow not found")
+                    : err instanceof WorkflowEngine.IllegalTransitionException ? new ApiError(400, err.getMessage())
+                    : err));
     }
 }

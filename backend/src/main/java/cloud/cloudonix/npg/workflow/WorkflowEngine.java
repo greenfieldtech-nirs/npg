@@ -1,118 +1,182 @@
 package cloud.cloudonix.npg.workflow;
 
+import cloud.cloudonix.npg.repository.AuditEventRepository;
 import io.vertx.core.Future;
 import io.vertx.core.json.JsonObject;
 import io.vertx.mysqlclient.MySQLClient;
-import io.vertx.sqlclient.Pool;
-import io.vertx.sqlclient.Row;
 import io.vertx.sqlclient.SqlClient;
 import io.vertx.sqlclient.Tuple;
 
+import java.time.LocalDateTime;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * Durable workflow state (docs/05). Every method runs on the caller's connection, so a state
+ * change, the outbound messages it causes and the timers it starts or stops commit together.
+ * Callers lock the workflow first ({@link #lock} / {@link #findForUpdate}); transitions are then
+ * checked against the workflow's state machine and recorded as np_workflow_events.
+ */
 public class WorkflowEngine {
 
-    private final Pool pool;
-    private final WorkflowEventService eventService;
-    private final Set<StateTransition> allowedTransitions = ConcurrentHashMap.newKeySet();
+    /** Columns a workflow step may set besides the state (whitelist: names go into SQL). */
+    private static final Set<String> UPDATABLE = Set.of("approved_port_time", "requested_port_time", "executed_at",
+        "current_operator_id", "original_operator_id", "recipient_operator_id", "donor_operator_id",
+        "failure_code", "failure_reason");
 
-    public WorkflowEngine(Pool pool) {
-        this.pool = pool;
-        this.eventService = new WorkflowEventService(pool);
-        loadDefaultTransitions();
+    public record NewWorkflow(String type, String role, String requestId, String phoneNumber,
+                              Long recipientOperatorId, Long donorOperatorId, Long originalOperatorId,
+                              LocalDateTime requestedPortTime, JsonObject context, String customerBatchId) {
     }
 
-    private void loadDefaultTransitions() {
-        allowedTransitions.add(new StateTransition("PORTING", "NEW", "CHECK_SENT", "Check"));
-        allowedTransitions.add(new StateTransition("PORTING", "CHECK_SENT", "CHECK_APPROVED", "Check_response"));
-        allowedTransitions.add(new StateTransition("PORTING", "CHECK_SENT", "CHECK_REJECTED", "Check_response"));
-        allowedTransitions.add(new StateTransition("PORTING", "CHECK_APPROVED", "REQUEST_SENT", "Request"));
-        allowedTransitions.add(new StateTransition("PORTING", "REQUEST_SENT", "REQUEST_APPROVED", "Request_response"));
-        allowedTransitions.add(new StateTransition("PORTING", "REQUEST_SENT", "REQUEST_REJECTED", "Request_response"));
-        allowedTransitions.add(new StateTransition("PORTING", "REQUEST_APPROVED", "PORT_SCHEDULED", "KD_update_response"));
-        allowedTransitions.add(new StateTransition("PORTING", "PORT_SCHEDULED", "UPDATE_SENT", "Update"));
-        allowedTransitions.add(new StateTransition("PORTING", "UPDATE_SENT", "PORT_SCHEDULED", "Update_response"));
-        allowedTransitions.add(new StateTransition("PORTING", "PORT_SCHEDULED", "CANCEL_SENT", "Cancel"));
-        allowedTransitions.add(new StateTransition("PORTING", "CANCEL_SENT", "CANCELLED", "Cancel_response"));
-        allowedTransitions.add(new StateTransition("PORTING", "PORT_SCHEDULED", "EXECUTION_SENT", "Execute"));
-        allowedTransitions.add(new StateTransition("PORTING", "EXECUTION_SENT", "EXECUTION_CONFIRMED", "Execute_response"));
-        allowedTransitions.add(new StateTransition("PORTING", "EXECUTION_CONFIRMED", "PUBLISH_PENDING", "Publish"));
-        allowedTransitions.add(new StateTransition("PORTING", "PUBLISH_PENDING", "PUBLISH_SENT", "Publish"));
-        allowedTransitions.add(new StateTransition("PORTING", "PUBLISH_SENT", "PUBLISHED", "Publish_response"));
-        allowedTransitions.add(new StateTransition("PORTING", "PUBLISHED", "COMPLETED", "auto"));
-    }
-
-    public Future<Long> createWorkflow(String workflowType, String requestId, String phoneNumber,
-                                         Long recipientOperatorId, Long donorOperatorId, String initialState) {
-        String workflowUuid = UUID.randomUUID().toString();
-        return pool.preparedQuery("""
-                INSERT INTO np_workflows (workflow_uuid, workflow_type, request_id, phone_number,
-                                          recipient_operator_id, donor_operator_id, current_state)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+    /** Creates a workflow in its machine's initial state. */
+    public Future<Workflow> create(SqlClient tx, NewWorkflow spec, String actor) {
+        StateMachines.Machine machine = StateMachines.of(spec.type(), spec.role());
+        String uuid = UUID.randomUUID().toString();
+        return tx.preparedQuery("""
+                INSERT INTO np_workflows (workflow_uuid, workflow_type, local_role, request_id, phone_number,
+                                          customer_batch_id, recipient_operator_id, donor_operator_id,
+                                          original_operator_id, requested_port_time, current_state,
+                                          context_json, created_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """)
-            .execute(Tuple.of(workflowUuid, workflowType, requestId, phoneNumber,
-                recipientOperatorId, donorOperatorId, initialState))
-            .map(rs -> rs.property(MySQLClient.LAST_INSERTED_ID))
-            .compose(id -> eventService.recordEvent(id, "WORKFLOW_CREATED", null, initialState, null,
-                    new JsonObject().put("requestId", requestId).put("phoneNumber", phoneNumber), "system")
-                .map(v -> id));
+            .execute(Tuple.from(new Object[]{uuid, spec.type(), spec.role(), spec.requestId(), spec.phoneNumber(),
+                spec.customerBatchId(), spec.recipientOperatorId(), spec.donorOperatorId(), spec.originalOperatorId(),
+                spec.requestedPortTime(), machine.initial(),
+                (spec.context() != null ? spec.context() : new JsonObject()).encode(), actor}))
+            .compose(rs -> {
+                long id = rs.property(MySQLClient.LAST_INSERTED_ID);
+                return new WorkflowEventService(tx).recordEvent(id, "WORKFLOW_CREATED", null, machine.initial(), null,
+                        new JsonObject().put("requestId", spec.requestId()).put("role", spec.role()), actor)
+                    .compose(v -> lock(tx, id));
+            });
     }
 
-    public Future<Void> transition(Long workflowId, String toState, String eventType,
-                                    Long messageId, JsonObject details, String createdBy) {
-        return pool.withTransaction(tx -> tx.preparedQuery("SELECT current_state, workflow_type FROM np_workflows WHERE id = ? FOR UPDATE")
+    /** Reads and row-locks a workflow for the rest of the transaction. */
+    public Future<Workflow> lock(SqlClient tx, long workflowId) {
+        return tx.preparedQuery("SELECT * FROM np_workflows WHERE id = ? FOR UPDATE")
             .execute(Tuple.of(workflowId))
-            .compose(rows -> {
-                if (!rows.iterator().hasNext()) {
-                    return Future.failedFuture("Workflow not found: " + workflowId);
-                }
-                Row row = rows.iterator().next();
-                String fromState = row.getString("current_state");
-                String workflowType = row.getString("workflow_type");
-                String messageType = details != null ? details.getString("messageType") : "auto";
+            .compose(rows -> rows.iterator().hasNext()
+                ? Future.succeededFuture(Workflow.from(rows.iterator().next()))
+                : Future.failedFuture(new WorkflowNotFoundException("Workflow " + workflowId + " not found")));
+    }
 
-                if (!isTransitionAllowed(workflowType, fromState, toState, messageType)) {
-                    return Future.failedFuture("Illegal transition from " + fromState + " to " + toState +
-                        " for workflow type " + workflowType);
-                }
+    public Future<Workflow> lockByUuid(SqlClient tx, String workflowUuid) {
+        return tx.preparedQuery("SELECT * FROM np_workflows WHERE workflow_uuid = ? FOR UPDATE")
+            .execute(Tuple.of(workflowUuid))
+            .compose(rows -> rows.iterator().hasNext()
+                ? Future.succeededFuture(Workflow.from(rows.iterator().next()))
+                : Future.failedFuture(new WorkflowNotFoundException("Workflow " + workflowUuid + " not found")));
+    }
 
-                return tx.preparedQuery("UPDATE np_workflows SET current_state = ?, updated_at = UTC_TIMESTAMP(6) WHERE id = ?")
-                    .execute(Tuple.of(toState, workflowId))
-                    .compose(u -> new WorkflowEventService(tx).recordEvent(workflowId, eventType, fromState, toState,
-                        messageId, details, createdBy));
-            }))
-            .mapEmpty();
+    /** The workflow of this type/role for a protocol REQUEST_ID, locked; null when there is none. */
+    public Future<Workflow> findForUpdate(SqlClient tx, String requestId, String type, String role) {
+        return tx.preparedQuery("""
+                SELECT * FROM np_workflows WHERE request_id = ? AND workflow_type = ? AND local_role = ?
+                ORDER BY id DESC LIMIT 1 FOR UPDATE
+                """)
+            .execute(Tuple.of(requestId, type, role))
+            .map(rows -> rows.iterator().hasNext() ? Workflow.from(rows.iterator().next()) : null);
     }
 
     /**
-     * Manual operator override via the management API. Skips state-machine validation
-     * (per docs/05_WORKFLOW_STATE_MACHINES.md manual transitions are overrides) but still
-     * records a workflow event with the mandatory reason.
+     * Automatic transition. Fails with {@link IllegalTransitionException} when the state machine
+     * does not allow it, leaving the workflow untouched.
      */
-    public Future<Void> manualTransition(Long workflowId, String toState, String eventType,
-                                         JsonObject details, String createdBy) {
-        return pool.withTransaction(tx -> tx.preparedQuery("SELECT current_state FROM np_workflows WHERE id = ? FOR UPDATE")
-            .execute(Tuple.of(workflowId))
-            .compose(rows -> {
-                if (!rows.iterator().hasNext()) {
-                    return Future.failedFuture("Workflow not found: " + workflowId);
-                }
-                String fromState = rows.iterator().next().getString("current_state");
-                return tx.preparedQuery("UPDATE np_workflows SET current_state = ?, updated_at = UTC_TIMESTAMP(6) WHERE id = ?")
-                    .execute(Tuple.of(toState, workflowId))
-                    .compose(u -> new WorkflowEventService(tx).recordEvent(workflowId, eventType, fromState, toState,
-                        null, details, createdBy));
-            }))
-            .mapEmpty();
+    public Future<Workflow> transition(SqlClient tx, Workflow wf, String to, String eventType, Long messageId,
+                                       JsonObject details, String actor) {
+        if (!wf.machine().allows(wf.state(), to)) {
+            return Future.failedFuture(new IllegalTransitionException(
+                "Illegal transition " + wf.state() + " -> " + to + " for " + wf.type() + "/" + wf.role()));
+        }
+        return applyState(tx, wf, to, eventType, messageId, details, actor);
     }
 
-    private boolean isTransitionAllowed(String workflowType, String fromState, String toState, String messageType) {
-        if (allowedTransitions.contains(new StateTransition(workflowType, fromState, toState, messageType))) {
-            return true;
+    /**
+     * Operator override from the management API: any state of the workflow's machine, a mandatory
+     * reason, an event and an audit record (docs/05 "Manual Transitions").
+     */
+    public Future<Workflow> manualTransition(SqlClient tx, Workflow wf, String to, String reason, String actor,
+                                             String remoteIp) {
+        if (reason == null || reason.isBlank()) {
+            return Future.failedFuture(new IllegalArgumentException("A reason is required for manual transitions"));
         }
-        return allowedTransitions.contains(new StateTransition(workflowType, fromState, toState, null))
-            || allowedTransitions.contains(new StateTransition(workflowType, fromState, toState, "auto"));
+        if (!wf.machine().states().contains(to)) {
+            return Future.failedFuture(new IllegalTransitionException(
+                to + " is not a state of " + wf.type() + "/" + wf.role() + "; valid: " + wf.machine().states()));
+        }
+        JsonObject details = new JsonObject().put("reason", reason).put("manual", true);
+        return applyState(tx, wf, to, "MANUAL_TRANSITION", null, details, actor)
+            .compose(updated -> new AuditEventRepository(tx).insertAuditEvent("USER", actor, "WORKFLOW_MANUAL_TRANSITION",
+                    "WORKFLOW", wf.uuid(), details.copy().put("fromState", wf.state()).put("toState", to).encode(), remoteIp)
+                .map(updated));
+    }
+
+    /** Records a workflow event without changing state (e.g. a port-time update applied in place). */
+    public Future<Void> recordEvent(SqlClient tx, Workflow wf, String eventType, Long messageId, JsonObject details,
+                                    String actor) {
+        return new WorkflowEventService(tx).recordEvent(wf.id(), eventType, wf.state(), wf.state(), messageId,
+            details, actor).mapEmpty();
+    }
+
+    /** Sets whitelisted columns on the workflow row. */
+    public Future<Void> update(SqlClient tx, Workflow wf, Map<String, Object> columns) {
+        if (columns.isEmpty()) {
+            return Future.succeededFuture();
+        }
+        StringBuilder sql = new StringBuilder("UPDATE np_workflows SET ");
+        Tuple params = Tuple.tuple();
+        for (Map.Entry<String, Object> column : columns.entrySet()) {
+            if (!UPDATABLE.contains(column.getKey())) {
+                return Future.failedFuture(new IllegalArgumentException("Column not updatable: " + column.getKey()));
+            }
+            sql.append(column.getKey()).append(" = ?, ");
+            params.addValue(column.getValue());
+        }
+        sql.append("updated_at = UTC_TIMESTAMP(6) WHERE id = ?");
+        params.addValue(wf.id());
+        return tx.preparedQuery(sql.toString()).execute(params).mapEmpty();
+    }
+
+    /** Merges keys into the workflow's context_json. */
+    public Future<Workflow> mergeContext(SqlClient tx, Workflow wf, JsonObject values) {
+        JsonObject merged = wf.context().copy().mergeIn(values);
+        return tx.preparedQuery("UPDATE np_workflows SET context_json = ?, updated_at = UTC_TIMESTAMP(6) WHERE id = ?")
+            .execute(Tuple.of(merged.encode(), wf.id()))
+            .map(rs -> new Workflow(wf.id(), wf.uuid(), wf.type(), wf.role(), wf.requestId(), wf.phoneNumber(),
+                wf.state(), wf.recipientOperatorId(), wf.donorOperatorId(), wf.originalOperatorId(),
+                wf.requestedPortTime(), wf.approvedPortTime(), merged));
+    }
+
+    private Future<Workflow> applyState(SqlClient tx, Workflow wf, String to, String eventType, Long messageId,
+                                        JsonObject details, String actor) {
+        StateMachines.Machine machine = wf.machine();
+        String stamp = machine.isTerminal(to) || StateMachines.FAILED.equals(to)
+            ? switch (to) {
+                case "CANCELLED", "PUBLICATION_CANCELLED" -> ", cancelled_at = UTC_TIMESTAMP(6)";
+                case "FAILED", "CHECK_REJECTED", "REQUEST_REJECTED", "RETURN_REJECTED", "SYNC_REJECTED",
+                     "PUBLICATION_REJECTED" -> ", failed_at = UTC_TIMESTAMP(6)";
+                default -> ", completed_at = UTC_TIMESTAMP(6)";
+            }
+            : "COMPLETED".equals(to) ? ", completed_at = UTC_TIMESTAMP(6)" : "";
+        return tx.preparedQuery("UPDATE np_workflows SET current_state = ?, updated_at = UTC_TIMESTAMP(6)" + stamp
+                + " WHERE id = ?")
+            .execute(Tuple.of(to, wf.id()))
+            .compose(u -> new WorkflowEventService(tx).recordEvent(wf.id(), eventType, wf.state(), to, messageId,
+                details, actor))
+            .map(v -> wf.withState(to));
+    }
+
+    public static class IllegalTransitionException extends RuntimeException {
+        public IllegalTransitionException(String message) {
+            super(message);
+        }
+    }
+
+    public static class WorkflowNotFoundException extends RuntimeException {
+        public WorkflowNotFoundException(String message) {
+            super(message);
+        }
     }
 }

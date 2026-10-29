@@ -6,18 +6,20 @@ import io.vertx.core.impl.logging.Logger;
 import io.vertx.core.impl.logging.LoggerFactory;
 import io.vertx.sqlclient.Pool;
 import io.vertx.sqlclient.Row;
+import io.vertx.sqlclient.SqlConnection;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.function.Function;
+import java.util.function.BiFunction;
 
 /**
- * Fires claimed timers. A failed action is retried with backoff; after {@link #MAX_ATTEMPTS} the
- * timer is marked FAILED and a manual task is opened, so a deadline is never silently lost.
- * Actions themselves must be idempotent: a timer reclaimed after a crash may fire twice.
+ * Fires claimed timers. The action's database effects commit together with the fenced
+ * SUCCEEDED update, so they apply exactly once even if the timer was reclaimed meanwhile.
+ * A failed action is retried with backoff; after {@link #MAX_ATTEMPTS} the timer is marked FAILED
+ * and a manual task is opened, so a deadline is never silently lost.
  */
 public class TimerProcessor {
 
@@ -26,9 +28,9 @@ public class TimerProcessor {
 
     private final Pool pool;
     private final TimerService timers;
-    private final Function<Row, Future<Void>> action;
+    private final BiFunction<SqlConnection, Row, Future<Void>> action;
 
-    public TimerProcessor(Pool pool, Function<Row, Future<Void>> action) {
+    public TimerProcessor(Pool pool, BiFunction<SqlConnection, Row, Future<Void>> action) {
         this.pool = pool;
         this.timers = new TimerService(pool);
         this.action = action;
@@ -48,9 +50,14 @@ public class TimerProcessor {
     Future<Void> fireOne(Row row) {
         Long id = row.getLong("id");
         String token = row.getString("locked_by");
-        return action.apply(row).transform(ar -> {
-            if (ar.succeeded()) {
-                return timers.markFired(id, token).mapEmpty();
+        return pool.withTransaction(tx -> action.apply(tx, row)
+                .compose(v -> new TimerService(tx).markFired(id, token))
+                .compose(stillOwned -> stillOwned
+                    ? Future.<Void>succeededFuture()
+                    : Future.failedFuture(new LostClaimException(id))))
+            .transform(ar -> {
+            if (ar.succeeded() || ar.cause() instanceof LostClaimException) {
+                return Future.<Void>succeededFuture();
             }
             int attemptNumber = row.getInteger("attempts") + 1;
             if (attemptNumber >= MAX_ATTEMPTS) {
@@ -67,5 +74,11 @@ public class TimerProcessor {
             return timers.markFailedRetryable(id, token,
                 LocalDateTime.now(ZoneOffset.UTC).plus(Duration.ofSeconds(30L << (attemptNumber - 1)))).mapEmpty();
         });
+    }
+
+    private static final class LostClaimException extends RuntimeException {
+        LostClaimException(Long timerId) {
+            super("Lost claim on timer " + timerId, null, false, false);
+        }
     }
 }

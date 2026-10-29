@@ -49,8 +49,14 @@ class TimerServiceTest {
                 pool = p;
                 sqlClient = p;
                 timerService = new TimerService(p);
-                workflowEngine = new WorkflowEngine(p);
-                dispatcher = new TimerActionDispatcher(timerService, workflowEngine);
+                workflowEngine = new WorkflowEngine();
+                cloud.cloudonix.npg.protocol.ProtocolCatalogLoader catalog =
+                    new cloud.cloudonix.npg.protocol.ProtocolCatalogLoader(vertx, "../docs/protocol");
+                cloud.cloudonix.npg.workflow.WorkflowServices services = new cloud.cloudonix.npg.workflow.WorkflowServices(
+                    p, workflowEngine, new TimerScheduler(catalog), null, null, catalog, null,
+                    new cloud.cloudonix.npg.workflow.OperatorDirectory());
+                dispatcher = new TimerActionDispatcher(workflowEngine,
+                    new cloud.cloudonix.npg.workflow.handler.WorkflowHandlerRegistry(services));
                 processor = new TimerProcessor(pool, dispatcher::dispatch);
                 ctx.completeNow();
             }));
@@ -70,13 +76,16 @@ class TimerServiceTest {
         sqlClient.query("SET FOREIGN_KEY_CHECKS = 0").execute()
             .compose(v -> sqlClient.query("TRUNCATE TABLE np_timers").execute())
             .compose(v -> sqlClient.query("TRUNCATE TABLE np_workflow_events").execute())
+            .compose(v -> sqlClient.query("TRUNCATE TABLE np_manual_tasks").execute())
             .compose(v -> sqlClient.query("TRUNCATE TABLE np_workflows").execute())
             .compose(v -> sqlClient.query("SET FOREIGN_KEY_CHECKS = 1").execute())
             .onComplete(ctx.succeedingThenComplete());
     }
 
     private Future<Long> createWorkflow() {
-        return workflowEngine.createWorkflow("PORTING", "req-timer", "0501234567", 1L, 2L, "NEW");
+        return pool.withTransaction(tx -> workflowEngine.create(tx, new WorkflowEngine.NewWorkflow("PORTING", "RECIPIENT",
+                "req-timer-" + java.util.UUID.randomUUID(), "0501234567", 1L, 2L, null, null, null, null), "test"))
+            .map(cloud.cloudonix.npg.workflow.Workflow::id);
     }
 
     @Test
@@ -107,7 +116,7 @@ class TimerServiceTest {
     void timerFireIsIdempotent(VertxTestContext ctx) {
         createWorkflow()
             .compose(wfId -> timerService.createTimer(wfId, null, "T1", "KD_CHECK",
-                LocalDateTime.now(ZoneOffset.UTC).minusMinutes(1), new JsonObject()))
+                LocalDateTime.now(ZoneOffset.UTC).minusMinutes(1), new JsonObject().put("expectedState", "NEW")))
             .compose(id -> timerService.claimDueTimers("worker-1", 10, 60)
                 .compose(rows -> processor.fireOne(rows.iterator().next()))
                 .compose(v -> sqlClient.preparedQuery("SELECT status FROM np_timers WHERE id = ?")

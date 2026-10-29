@@ -147,7 +147,8 @@ public class ManagementApiVerticle extends AbstractVerticle {
                     ctx.pathParam("workflowUuid"),
                     body.getString("toState"),
                     body.getString("reason"),
-                    ctx.get("actorId")));
+                    ctx.get("actorId"),
+                    remoteIp(ctx)));
             });
 
         router.get("/api/messages")

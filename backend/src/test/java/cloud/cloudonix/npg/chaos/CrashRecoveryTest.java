@@ -462,7 +462,7 @@ class CrashRecoveryTest {
 
     @Test
     void failingTimerActionIsRetriedThenEscalated(VertxTestContext ctx) {
-        TimerProcessorAccess failing = new TimerProcessorAccess(pool, row -> Future.failedFuture("boom"));
+        TimerProcessorAccess failing = new TimerProcessorAccess(pool, (tx, row) -> Future.failedFuture("boom"));
         timers.createTimer(null, null, "T", "TEST", LocalDateTime.now(ZoneOffset.UTC).minusSeconds(5), new JsonObject())
             .compose(id -> timers.claimDueTimers("w", 10, 60))
             .compose(failing::fireAll)
