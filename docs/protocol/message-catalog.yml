@@ -322,8 +322,8 @@ messages:
   - name: Execute
     family: PORTING
     directionality: OPERATOR_TO_OPERATOR
-    sender_role: DONOR_OPERATOR
-    receiver_role: RECIPIENT_OPERATOR
+    sender_role: RECIPIENT_OPERATOR
+    receiver_role: DONOR_OPERATOR
     ack_required: true
     business_response: Execute_response
     xml_schema: null
@@ -347,14 +347,15 @@ messages:
     resulting_states:
       - EXECUTION_SENT
     notes:
+      - "Corrected 2026-10-29 from the live operator trace: the recipient sends Execute to the donor at the approved port time (body is empty, <Execute/>); the donor disconnects the number and answers Execute_response with positiveApproval/disconnectDateTime."
       - "Donor executes the port at the scheduled time."
     open_questions: []
 
   - name: Execute_response
     family: PORTING
     directionality: OPERATOR_TO_OPERATOR
-    sender_role: RECIPIENT_OPERATOR
-    receiver_role: DONOR_OPERATOR
+    sender_role: DONOR_OPERATOR
+    receiver_role: RECIPIENT_OPERATOR
     ack_required: true
     business_response: null
     xml_schema: null
@@ -378,6 +379,7 @@ messages:
     resulting_states:
       - EXECUTION_CONFIRMED
     notes:
+      - "Corrected 2026-10-29 from the live operator trace: sent by the donor; carries requestTrxNo and positiveApproval/disconnectDateTime."
       - "Recipient confirms execution."
     open_questions: []
 
