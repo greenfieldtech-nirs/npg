@@ -1055,6 +1055,26 @@ class ManagementApiTest {
             })));
     }
 
+    @Test
+    void numberRangesAreAdminManagedAndValidated(VertxTestContext ctx) {
+        webClient.post("/api/number-ranges").putHeader("Authorization", adminAuth())
+                .sendJsonObject(new JsonObject().put("operatorCode", "OP01").put("prefix", "0812").put("description", "block A"))
+            .compose(resp -> {
+                ctx.verify(() -> assertEquals(200, resp.statusCode(), resp.bodyAsString()));
+                return webClient.post("/api/number-ranges").putHeader("Authorization", adminAuth())
+                    .sendJsonObject(new JsonObject().put("operatorCode", "OP01").put("prefix", "0812"));
+            })
+            .compose(resp -> {
+                ctx.verify(() -> assertEquals(409, resp.statusCode(), resp.bodyAsString()));
+                return webClient.post("/api/number-ranges").putHeader("Authorization", adminAuth())
+                    .sendJsonObject(new JsonObject().put("operatorCode", "OP01").put("prefix", "08%"));
+            })
+            .onComplete(ctx.succeeding(resp -> ctx.verify(() -> {
+                assertEquals(400, resp.statusCode(), "wildcards are not prefixes");
+                ctx.completeNow();
+            })));
+    }
+
     /** Real signed token for the seeded ADMIN user — the API re-checks the user in the DB. */
     private static String adminAuth() {
         return bearer(TEST_ADMIN, "ADMIN");

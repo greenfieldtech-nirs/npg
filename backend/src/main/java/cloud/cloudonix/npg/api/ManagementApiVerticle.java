@@ -53,6 +53,7 @@ public class ManagementApiVerticle extends AbstractVerticle {
     private UserManagementApiHandler userManagementApiHandler;
     private PortingApiHandler portingApiHandler;
     private ProcessApiHandler processApiHandler;
+    private NumberRangeApiHandler numberRangeApiHandler;
 
     @Override
     public void start(Promise<Void> startPromise) {
@@ -85,6 +86,7 @@ public class ManagementApiVerticle extends AbstractVerticle {
                     Env.get("CATALOG_PATH", "docs/protocol"));
                 portingApiHandler = new PortingApiHandler(new PortingService(services, PortOutPolicy.fromEnvironment()));
                 processApiHandler = new ProcessApiHandler(services);
+                numberRangeApiHandler = new NumberRangeApiHandler(pool);
                 return xmlAuditService.ensureIndexes();
             })
             .compose(v -> {
@@ -200,6 +202,17 @@ public class ManagementApiVerticle extends AbstractVerticle {
         router.post("/api/sync")
             .handler(guard.requireAny("ADMIN", "MANAGER"))
             .handler(ctx -> handleJson(ctx, processApiHandler.requestSync(jsonBody(ctx), ctx.get("actorId"), remoteIp(ctx))));
+
+        router.get("/api/number-ranges")
+            .handler(guard.authenticated())
+            .handler(ctx -> handleJson(ctx, numberRangeApiHandler.list()));
+        router.post("/api/number-ranges")
+            .handler(guard.requireAny("ADMIN"))
+            .handler(ctx -> handleJson(ctx, numberRangeApiHandler.create(jsonBody(ctx), ctx.get("actorId"), remoteIp(ctx))));
+        router.delete("/api/number-ranges/:rangeId")
+            .handler(guard.requireAny("ADMIN"))
+            .handler(ctx -> handleEmpty(ctx, numberRangeApiHandler.delete(longPathParam(ctx, "rangeId"), ctx.get("actorId"),
+                remoteIp(ctx))));
 
         router.get("/api/messages")
             .handler(guard.authenticated())

@@ -2,6 +2,7 @@ package cloud.cloudonix.npg.workflow.porting;
 
 import cloud.cloudonix.npg.config.Env;
 import cloud.cloudonix.npg.number.NumberOwnershipService;
+import cloud.cloudonix.npg.number.NumberRanges;
 import cloud.cloudonix.npg.workflow.StateMachines;
 import cloud.cloudonix.npg.workflow.Workflow;
 import io.vertx.core.Future;
@@ -74,7 +75,10 @@ public class PortOutPolicy {
     }
 
     public Future<Decision> onCheck(SqlClient tx, Workflow wf, long localOperatorId) {
-        return NumberOwnershipService.currentOperatorId(tx, wf.phoneNumber()).compose(owner -> {
+        return NumberOwnershipService.currentOperatorId(tx, wf.phoneNumber())
+            // never ported: the range holder serves it
+            .compose(owner -> owner != null ? Future.succeededFuture(owner) : NumberRanges.nativeOperator(tx, wf.phoneNumber()))
+            .compose(owner -> {
             if (owner != null && owner != localOperatorId) {
                 return Future.succeededFuture(Decision.reject("REJECTED_NUMBER_NOT_FOUND",
                     "The number is not served by this operator"));

@@ -1,6 +1,7 @@
 package cloud.cloudonix.npg.workflow.handler;
 
 import cloud.cloudonix.npg.number.NumberOwnershipService;
+import cloud.cloudonix.npg.number.NumberRanges;
 import cloud.cloudonix.npg.workflow.InboundMessage;
 import cloud.cloudonix.npg.workflow.ProtocolBodies;
 import cloud.cloudonix.npg.workflow.PublicationTracker;
@@ -98,16 +99,26 @@ public class PublicationWorkflowHandler implements WorkflowHandler {
         if (owner != null && !owner.equals(publisher) && (donor == null || !owner.equals(donor.id()))) {
             return refuse(tx, wf, publish, "The publication must name the operator recorded as serving the number as donor");
         }
-        if (owner == null && donor != null && donor.id().equals(local.id())) {
-            // our native numbers are not in np_numbers: only a port-out we completed to the publisher counts
-            return completedPortOutTo(tx, phone, publisher).compose(completed -> completed
-                ? apply(tx, wf, publish, phone, publisher, local.id(), false)
-                : refuse(tx, wf, publish, "Names this operator as donor, but no port-out of the number to the publisher was completed"));
+        if (owner != null) {
+            return apply(tx, wf, publish, phone, publisher, owner, false);
         }
-        // a first publication of another operator's number: not verifiable from a third party's view
-        // (no number-range data); accepted from the authenticated publisher, previous owner as named
-        Long previous = owner != null ? owner : (donor != null ? donor.id() : null);
-        return apply(tx, wf, publish, phone, publisher, previous, false);
+        // never ported before: whose native number is it? decided from our range data, not the message
+        return NumberRanges.nativeOperator(tx, phone).compose(nativeOwner -> {
+            if (local.id().equals(nativeOwner) || (nativeOwner == null && donor != null && donor.id().equals(local.id()))) {
+                return completedPortOutTo(tx, phone, publisher).compose(completed -> completed
+                    ? apply(tx, wf, publish, phone, publisher, local.id(), false)
+                    : refuse(tx, wf, publish, "The number belongs to this operator and was never ported out to the publisher"));
+            }
+            if (nativeOwner != null) {
+                return donor != null && donor.id().equals(nativeOwner)
+                    ? apply(tx, wf, publish, phone, publisher, nativeOwner, false)
+                    : refuse(tx, wf, publish, "The publication must name the number's range holder as donor");
+            }
+            // no range data for this number: only accepted when it names a donor (fail closed otherwise)
+            return donor != null
+                ? apply(tx, wf, publish, phone, publisher, donor.id(), false)
+                : refuse(tx, wf, publish, "Unrecognised number range and no donor named");
+        });
     }
 
     private Future<Boolean> completedPortOutTo(SqlConnection tx, String phone, Long publisher) {

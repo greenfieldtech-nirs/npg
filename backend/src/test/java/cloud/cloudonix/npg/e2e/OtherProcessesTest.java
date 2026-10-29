@@ -341,6 +341,65 @@ class OtherProcessesTest {
             })));
     }
 
+    private Future<Void> range(String prefix, String operator) {
+        return h.operatorId(operator).compose(id -> pool.preparedQuery(
+            "INSERT INTO np_number_ranges (operator_id, prefix) VALUES (?, ?)").execute(Tuple.of(id, prefix))).mapEmpty();
+    }
+
+    private static String publishFor(String donor) {
+        return (donor != null ? "<donor>" + donor + "</donor>" : "") + "<publishType>Port</publishType>"
+            + "<fixed><fixedNumberSingle><numberType>S</numberType><number>" + PHONE + "</number></fixedNumberSingle></fixed>";
+    }
+
+    @Test
+    void ourNeverPortedNumberCannotBePublishedAwayWhateverDonorIsNamed(VertxTestContext ctx) {
+        range("081", "LOC")
+            .compose(v -> h.deliver("P1", "Publish", "NPP1DON261030000000520", publishFor("DON")))
+            .compose(ack -> h.number(PHONE))
+            .onComplete(ctx.succeeding(number -> ctx.verify(() -> {
+                assertNull(number, "still natively ours");
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void aForeignNumberMustNameItsRangeHolderAsDonor(VertxTestContext ctx) {
+        range("081", "DON")
+            .compose(v -> h.deliver("P1", "Publish", "NPP1P2261030000000521", publishFor("P2")))
+            .compose(ack -> h.number(PHONE))
+            .compose(number -> {
+                ctx.verify(() -> assertNull(number, "P2 is not the range holder"));
+                return h.deliver("P1", "Publish", "NPP1DON261030000000522", publishFor("DON"));
+            })
+            .compose(ack -> h.number(PHONE))
+            .onComplete(ctx.succeeding(number -> ctx.verify(() -> {
+                assertEquals("P1", number.getString("current_code"));
+                assertEquals("DON", number.getString("original_code"));
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void anUnknownNumberWithoutADonorIsRefused(VertxTestContext ctx) {
+        h.deliver("P1", "Publish", "NPP1XX261030000000523", publishFor(null))
+            .compose(ack -> h.number(PHONE))
+            .onComplete(ctx.succeeding(number -> ctx.verify(() -> {
+                assertNull(number);
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void asDonorWeRejectAPortOutOfANumberFromSomeoneElsesRange(VertxTestContext ctx) {
+        range("081", "P2")
+            .compose(v -> h.deliver("P1", "Check", "NPP1LOC261030000000524", ProtocolHarness.checkBody(PHONE)))
+            .compose(ack -> h.lastSent("Check_response", "P1"))
+            .onComplete(ctx.succeeding(response -> ctx.verify(() -> {
+                assertTrue(response.xml().contains("<rejectReasonCode>REJECTED_NUMBER_NOT_FOUND</rejectReasonCode>"), response.xml());
+                ctx.completeNow();
+            })));
+    }
+
     @Test
     void aStaleCancelPublishCannotRollBackNewerRouting(VertxTestContext ctx) {
         String publish = "<donor>DON</donor><publishType>Port</publishType><fixed><fixedNumberSingle><numberType>S</numberType>"

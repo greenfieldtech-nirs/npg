@@ -74,11 +74,11 @@ public class TestDatabase {
         return value != null && !value.isBlank() ? value : defaultValue;
     }
 
-    /** Child-before-parent order for {@link #clean}. Users/roles and operators are kept. */
+    /** Child-before-parent order for {@link #clean}. Users/roles and operators are kept; ranges go (they reference operators). */
     private static final String[] BUSINESS_TABLES = {
         "np_manual_task_notes", "np_manual_tasks", "np_timers", "np_publication_recipients", "np_workflow_events",
         "np_inbox", "np_outbox", "np_messages", "np_number_ownership_history", "np_numbers", "np_workflows",
-        "np_audit_events"
+        "np_audit_events", "np_number_ranges"
     };
 
     /** Deletes all workflow, queue, message and number data (DELETE, so FK checks stay on). */
