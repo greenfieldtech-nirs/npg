@@ -13,6 +13,7 @@ import io.vertx.core.Future;
 import io.vertx.core.json.JsonObject;
 import io.vertx.sqlclient.Row;
 import io.vertx.sqlclient.SqlConnection;
+import io.vertx.sqlclient.Tuple;
 
 /**
  * Publication messages.
@@ -91,27 +92,46 @@ public class PublicationWorkflowHandler implements WorkflowHandler {
         Long publisher = publish.senderOperatorId();
         Long owner = recorded != null ? recorded.currentOperatorId() : null;
         if (owner != null && owner.equals(local.id())) {
-            // our own number: only a port-out we completed to this publisher explains it — and that
-            // already moved the routing, so a Publish claiming a number we still serve is refused
+            // a number we still serve: a completed port-out to this publisher would already have moved it
             return refuse(tx, wf, publish, "This operator still serves the number; no completed port-out to the publisher");
         }
-        if (owner != null && donor != null && !owner.equals(donor.id()) && !owner.equals(publisher)) {
-            return refuse(tx, wf, publish, "The named donor does not match the operator recorded as serving the number");
+        if (owner != null && !owner.equals(publisher) && (donor == null || !owner.equals(donor.id()))) {
+            return refuse(tx, wf, publish, "The publication must name the operator recorded as serving the number as donor");
         }
+        if (owner == null && donor != null && donor.id().equals(local.id())) {
+            // our native numbers are not in np_numbers: only a port-out we completed to the publisher counts
+            return completedPortOutTo(tx, phone, publisher).compose(completed -> completed
+                ? apply(tx, wf, publish, phone, publisher, local.id(), false)
+                : refuse(tx, wf, publish, "Names this operator as donor, but no port-out of the number to the publisher was completed"));
+        }
+        // a first publication of another operator's number: not verifiable from a third party's view
+        // (no number-range data); accepted from the authenticated publisher, previous owner as named
         Long previous = owner != null ? owner : (donor != null ? donor.id() : null);
         return apply(tx, wf, publish, phone, publisher, previous, false);
     }
 
+    private Future<Boolean> completedPortOutTo(SqlConnection tx, String phone, Long publisher) {
+        return tx.preparedQuery("""
+                SELECT COUNT(*) AS c FROM np_workflows WHERE workflow_type = 'PORTING' AND local_role = 'DONOR'
+                  AND phone_number = ? AND counterparty_operator_id = ? AND current_state = 'COMPLETED'
+                """).execute(Tuple.of(phone, publisher))
+            .map(rows -> rows.iterator().next().getLong("c") > 0);
+    }
+
+    /** Returns are verified strictly: the number must be recorded with matching current and original operators. */
     private Future<Void> applyReturn(SqlConnection tx, Workflow wf, InboundMessage publish, String phone,
                                      cloud.cloudonix.npg.domain.Operator local, cloud.cloudonix.npg.domain.Operator original,
                                      NumberOwnershipService.Ownership recorded) {
         if (original == null) {
             return refuse(tx, wf, publish, "Unknown original operator in the return publication");
         }
-        if (recorded != null && recorded.currentOperatorId() != null && !recorded.currentOperatorId().equals(publish.senderOperatorId())) {
-            return refuse(tx, wf, publish, "Only the operator serving a number can publish its return");
+        if (original.id().equals(local.id())) {
+            return refuse(tx, wf, publish, "Returns to this operator arrive as a Return message, not a Publish");
         }
-        if (recorded != null && recorded.originalOperatorId() != null && !recorded.originalOperatorId().equals(original.id())) {
+        if (recorded == null || !publish.senderOperatorId().equals(recorded.currentOperatorId())) {
+            return refuse(tx, wf, publish, "Only the operator recorded as serving the number can publish its return");
+        }
+        if (!original.id().equals(recorded.originalOperatorId())) {
             return refuse(tx, wf, publish, "The named original operator does not match our records");
         }
         return apply(tx, wf, publish, phone, original.id(), publish.senderOperatorId(), true);
