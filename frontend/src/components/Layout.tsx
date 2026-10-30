@@ -42,13 +42,6 @@ const navItems: { label: string; path: string; icon: JSX.Element; adminOnly?: bo
   { label: 'Israel Numbering Plan', path: '/numbering-plan', icon: <MapIcon fontSize="small" /> }
 ]
 
-function pageTitle(pathname: string): string {
-  if (pathname.startsWith('/workflows/')) return 'Workflow Detail'
-  if (pathname.startsWith('/messages/') && pathname.endsWith('/xml')) return 'Raw XML'
-  if (pathname.startsWith('/messages')) return 'Log Viewer'
-  return navItems.find(item => item.path === pathname)?.label ?? 'Dashboard'
-}
-
 export default function Layout({ children }: { children: ReactNode }) {
   const location = useLocation()
   const navigate = useNavigate()
@@ -67,13 +60,10 @@ export default function Layout({ children }: { children: ReactNode }) {
       <AppBar position="fixed" sx={{ zIndex: theme => theme.zIndex.drawer + 1 }}>
         <Toolbar>
           <Box component={RouterLink} to="/" aria-label="NPG dashboard"
-            sx={{ display: 'flex', alignItems: 'center', gap: 1.25, textDecoration: 'none', width: DRAWER_WIDTH - 24, flexShrink: 0 }}>
+            sx={{ display: 'flex', alignItems: 'center', gap: 1.25, textDecoration: 'none', mr: 'auto' }}>
             <NpgMark size={40} surface="dark" />
             <NpgWordmark size={22} surface="dark" />
           </Box>
-          <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1, color: brand.paper }}>
-            {pageTitle(location.pathname)}
-          </Typography>
           <Box sx={{ display: { xs: 'none', md: 'flex' }, fontFamily: MONO_FONT, fontSize: 12, borderRadius: '4px', overflow: 'hidden' }}>
             <Box sx={{ px: 1, py: 0.5, bgcolor: brand.ink2, color: brand.paper }}>npg</Box>
             <Box sx={{ px: 1, py: 0.5, bgcolor: brand.deepSignal, color: '#FFFFFF' }}>v0.1.0</Box>

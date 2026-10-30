@@ -1,14 +1,12 @@
-import { ReactNode } from 'react'
 import { Link as RouterLink } from 'react-router-dom'
 import {
   Box, Button, Card, CardContent, Container, Grid, Typography, Accordion, AccordionSummary, AccordionDetails
 } from '@mui/material'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
-import { NpgLockup, NpgMark, NpgWordmark } from '../components/brand/NpgMark'
+import { SectionLabel, SiteFooter, SiteHeader } from '../components/site/SiteChrome'
+import { REPO_URL, signalButton } from '../components/site/site'
 import { brand, MONO_FONT } from '../theme/brand'
-
-const REPO_URL = 'https://github.com/greenfieldtech-nirs/npg'
 
 const codeSample = `POST /np/inbound HTTP/1.1
 Content-Type: application/xml
@@ -69,14 +67,6 @@ function Terminal({ title, code }: { title: string; code: string }) {
   )
 }
 
-function SectionLabel({ children, dark = false }: { children: ReactNode; dark?: boolean }) {
-  return (
-    <Typography variant="overline" component="div" sx={{ color: dark ? brand.signal : brand.deepSignal, mb: 1 }}>
-      {children}
-    </Typography>
-  )
-}
-
 function FeatureCard({ index, title, children }: { index: string; title: string; children: string }) {
   return (
     <Card sx={{ height: '100%', '&:hover': { boxShadow: 'none' } }}>
@@ -108,27 +98,10 @@ const faqs = [
   }
 ]
 
-const navLink = { color: brand.mist, '&:hover': { color: brand.paper, bgcolor: 'transparent' } }
-
 export default function LandingPage() {
   return (
     <Box sx={{ bgcolor: 'background.default', minHeight: '100vh' }}>
-      <Box component="header" sx={{ bgcolor: brand.ink, color: brand.paper }}>
-        <Container maxWidth="lg" sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 2, flexWrap: 'wrap' }}>
-          <Box sx={{ flexGrow: 1 }}>
-            <NpgLockup markSize={40} wordSize={24} surface="dark" />
-          </Box>
-          <Box sx={{ display: { xs: 'none', sm: 'flex' }, gap: 0.5 }}>
-            <Button sx={navLink} href="#features">Features</Button>
-            <Button sx={navLink} href="#protocol">Protocol</Button>
-            <Button sx={navLink} href="#faq">FAQ</Button>
-          </Box>
-          <Button component={RouterLink} to="/login" variant="contained"
-            sx={{ ml: 1, bgcolor: brand.signal, color: brand.ink, '&:hover': { bgcolor: '#67E8F9' } }}>
-            Sign in
-          </Button>
-        </Container>
-
+      <SiteHeader>
         <Container maxWidth="lg" sx={{ pt: { xs: 6, md: 10 }, pb: { xs: 8, md: 12 } }}>
           <Grid container spacing={6} alignItems="center">
             <Grid item xs={12} md={6}>
@@ -142,7 +115,7 @@ export default function LandingPage() {
               </Typography>
               <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
                 <Button component={RouterLink} to="/login" variant="contained" size="large" endIcon={<ArrowForwardIcon />}
-                  sx={{ bgcolor: brand.signal, color: brand.ink, '&:hover': { bgcolor: '#67E8F9' } }}>
+                  sx={signalButton}>
                   Sign in to the console
                 </Button>
                 <Button href={REPO_URL} target="_blank" rel="noopener noreferrer" variant="outlined" size="large"
@@ -156,7 +129,7 @@ export default function LandingPage() {
             </Grid>
           </Grid>
         </Container>
-      </Box>
+      </SiteHeader>
 
       <Container maxWidth="lg" sx={{ py: { xs: 7, md: 10 } }} id="features">
         <SectionLabel>01 — What it does</SectionLabel>
@@ -189,6 +162,9 @@ export default function LandingPage() {
             </FeatureCard>
           </Grid>
         </Grid>
+        <Button component={RouterLink} to="/features" endIcon={<ArrowForwardIcon />} sx={{ mt: 3 }}>
+          Tour every screen of the console
+        </Button>
       </Container>
 
       <Box sx={{ bgcolor: '#FFFFFF', borderTop: `1px solid ${brand.line}`, borderBottom: `1px solid ${brand.line}`, py: { xs: 7, md: 10 } }} id="protocol">
@@ -234,21 +210,7 @@ export default function LandingPage() {
         ))}
       </Container>
 
-      <Box component="footer" sx={{ bgcolor: brand.ink, color: brand.mist }}>
-        <Container maxWidth="lg" sx={{ py: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-            <NpgMark size={32} surface="dark" />
-            <NpgWordmark size={18} surface="dark" />
-            <Typography variant="caption" sx={{ ml: 1 }}>
-              Number Portability Gateway · GPL-3.0 (≤ 50k numbers) / Commercial
-            </Typography>
-          </Box>
-          <Box sx={{ display: 'flex', gap: 2.5, fontFamily: MONO_FONT, fontSize: 13 }}>
-            <Box component="a" href={REPO_URL} target="_blank" rel="noopener noreferrer" sx={{ color: brand.signal }}>github</Box>
-            <Box component={RouterLink} to="/login" sx={{ color: brand.signal }}>sign in</Box>
-          </Box>
-        </Container>
-      </Box>
+      <SiteFooter />
     </Box>
   )
 }
