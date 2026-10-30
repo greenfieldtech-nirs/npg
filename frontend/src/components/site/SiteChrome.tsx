@@ -17,6 +17,7 @@ export function SiteHeader({ children }: { children?: ReactNode }) {
         </Box>
         <Box component="nav" sx={{ display: { xs: 'none', sm: 'flex' }, gap: 0.5 }}>
           <Button component={RouterLink} to="/features" sx={navLink}>Features</Button>
+          <Button component={RouterLink} to="/compatibility" sx={navLink}>Compatibility</Button>
           <Button href="/landing#protocol" sx={navLink}>Protocol</Button>
           <Button href="/landing#faq" sx={navLink}>FAQ</Button>
         </Box>
@@ -42,6 +43,7 @@ export function SiteFooter() {
         </Box>
         <Box sx={{ display: 'flex', gap: 2.5, fontFamily: MONO_FONT, fontSize: 13 }}>
           <Box component={RouterLink} to="/features" sx={{ color: brand.signal }}>features</Box>
+          <Box component={RouterLink} to="/compatibility" sx={{ color: brand.signal }}>compatibility</Box>
           <Box component="a" href={REPO_URL} target="_blank" rel="noopener noreferrer" sx={{ color: brand.signal }}>github</Box>
           <Box component={RouterLink} to="/login" sx={{ color: brand.signal }}>sign in</Box>
         </Box>
