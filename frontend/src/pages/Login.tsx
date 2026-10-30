@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { Alert, Box, Button, Card, CardContent, TextField, Typography } from '@mui/material'
 import axios from 'axios'
 import { useAuth } from '../auth/AuthContext'
+import { NpgLockup } from '../components/brand/NpgMark'
 
 export default function Login() {
   const { login } = useAuth()
@@ -40,20 +41,18 @@ export default function Login() {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        bgcolor: 'grey.50'
+        bgcolor: 'background.default',
+        px: 2
       }}
     >
-      <Card sx={{ width: 380, borderRadius: '12px' }}>
-        <CardContent sx={{ p: 4, display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <Card sx={{ width: '100%', maxWidth: 400, '&:hover': { boxShadow: 'none' } }}>
+        <CardContent sx={{ p: 4, display: 'flex', flexDirection: 'column', gap: 2.5 }}>
           <Box sx={{ mb: 1 }}>
-            <Typography
-              sx={{ fontFamily: "'Archivo', sans-serif", fontWeight: 700, fontSize: 32, color: 'primary.main', lineHeight: 1 }}
-            >
-              NPG
-            </Typography>
-            <Typography variant="caption" color="text.secondary">
-              Number Portability Gateway
-            </Typography>
+            <NpgLockup markSize={64} wordSize={32} descriptor />
+          </Box>
+          <Box>
+            <Typography variant="overline" color="primary">Operations console</Typography>
+            <Typography variant="h5">Sign in</Typography>
           </Box>
           {error && <Alert severity="error">{error}</Alert>}
           <Box component="form" onSubmit={onSubmit} sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>

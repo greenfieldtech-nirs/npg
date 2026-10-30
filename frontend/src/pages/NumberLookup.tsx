@@ -127,7 +127,7 @@ export default function NumberLookup() {
           {record && (
             <>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 2 }}>
-                <Typography variant="h6" sx={{ fontFamily: "'Archivo', sans-serif" }}>
+                <Typography variant="h6">
                   {record.phoneNumber}
                 </Typography>
                 <Chip label={record.status} color={statusColor(record.status)} size="small" />

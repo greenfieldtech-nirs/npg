@@ -1,6 +1,7 @@
 import { Box, Typography } from '@mui/material'
 import { ReactNode } from 'react'
 import { formatXml } from '../utils/formatXml'
+import { MONO_FONT } from '../theme/brand'
 
 function colorizeXmlLine(line: string, key: number): ReactNode {
   const parts: ReactNode[] = []
@@ -16,7 +17,7 @@ function colorizeXmlLine(line: string, key: number): ReactNode {
     let color = 'text.primary'
     if (token.startsWith('<')) color = 'primary.main'
     else if (token === '>' || token === '/>') color = 'primary.main'
-    else if (token.includes('=')) color = 'secondary.dark'
+    else if (token.includes('=')) color = 'warning.main'
     parts.push(
       <Box component="span" key={keySeq++} sx={{ color }}>
         {token}
@@ -35,7 +36,7 @@ export default function XmlBlock({ xml }: { xml: string }) {
     <Typography
       component="pre"
       sx={{
-        fontFamily: 'monospace',
+        fontFamily: MONO_FONT,
         fontSize: 13,
         lineHeight: 1.6,
         whiteSpace: 'pre-wrap',

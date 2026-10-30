@@ -1,10 +1,14 @@
+import { ReactNode } from 'react'
 import { Link as RouterLink } from 'react-router-dom'
 import {
-  AppBar, Box, Button, Card, CardContent, Chip, Container, Divider,
-  Grid, Paper, Toolbar, Typography, Accordion, AccordionSummary, AccordionDetails
+  Box, Button, Card, CardContent, Container, Grid, Typography, Accordion, AccordionSummary, AccordionDetails
 } from '@mui/material'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
+import { NpgLockup, NpgMark, NpgWordmark } from '../components/brand/NpgMark'
+import { brand, MONO_FONT } from '../theme/brand'
+
+const REPO_URL = 'https://github.com/greenfieldtech-nirs/npg'
 
 const codeSample = `POST /np/inbound HTTP/1.1
 Content-Type: application/xml
@@ -29,35 +33,56 @@ const ackSample = `<AckNack>
   <OriginalTransactionId>BZ000959453468</OriginalTransactionId>
 </AckNack>`
 
-function CodePanel({ code }: { code: string }) {
+/** Header names in Mist, the request line and XML tags in Signal, values in Paper. */
+function terminalLine(line: string, i: number) {
+  const header = /^([A-Za-z-]+):(.*)$/.exec(line)
+  if (i === 0 && /^[A-Z]+ /.test(line)) {
+    const [method, ...rest] = line.split(' ')
+    return <div key={i}><Box component="span" sx={{ color: brand.signal }}>{method}</Box> {rest.join(' ')}</div>
+  }
+  if (header) return <div key={i}><Box component="span" sx={{ color: brand.mist }}>{header[1]}:</Box>{header[2]}</div>
+  const parts = line.split(/(<\/?[A-Za-z_][\w:.-]*>)/g)
   return (
-    <Paper
-      elevation={0}
-      sx={{
-        bgcolor: '#1B1B1F',
-        color: '#E0E0FF',
-        borderRadius: 3,
-        p: 2.5,
-        fontFamily: 'monospace',
-        fontSize: 12.5,
-        lineHeight: 1.7,
-        whiteSpace: 'pre-wrap',
-        wordBreak: 'break-word',
-        overflowX: 'auto'
-      }}
-    >
-      {code}
-    </Paper>
+    <div key={i}>
+      {parts.map((p, j) => (p.startsWith('<')
+        ? <Box component="span" key={j} sx={{ color: brand.signal }}>{p}</Box>
+        : <span key={j}>{p}</span>))}
+      {line === '' && ' '}
+    </div>
   )
 }
 
-function FeatureCard({ title, children }: { title: string; children: string }) {
+function Terminal({ title, code }: { title: string; code: string }) {
   return (
-    <Card elevation={0} sx={{ border: 1, borderColor: 'divider', borderRadius: 3, height: '100%' }}>
-      <CardContent>
-        <Typography variant="subtitle1" sx={{ fontFamily: "'Archivo', sans-serif", fontWeight: 600, mb: 1 }}>
-          {title}
-        </Typography>
+    <Box sx={{ borderRadius: '14px', overflow: 'hidden', bgcolor: brand.ink2, border: `1px solid ${brand.slate}` }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 2, py: 1.25, bgcolor: brand.ink, borderBottom: `1px solid ${brand.ink2}` }}>
+        {[0, 1, 2].map(d => <Box key={d} sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: brand.slate }} />)}
+        <Box sx={{ ml: 1, fontFamily: MONO_FONT, fontSize: 12, color: brand.mist }}>{title}</Box>
+      </Box>
+      <Box component="pre" sx={{
+        m: 0, p: 2.5, fontFamily: MONO_FONT, fontSize: 13, lineHeight: 1.7, color: brand.paper,
+        whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflowX: 'auto'
+      }}>
+        {code.split('\n').map(terminalLine)}
+      </Box>
+    </Box>
+  )
+}
+
+function SectionLabel({ children, dark = false }: { children: ReactNode; dark?: boolean }) {
+  return (
+    <Typography variant="overline" component="div" sx={{ color: dark ? brand.signal : brand.deepSignal, mb: 1 }}>
+      {children}
+    </Typography>
+  )
+}
+
+function FeatureCard({ index, title, children }: { index: string; title: string; children: string }) {
+  return (
+    <Card sx={{ height: '100%', '&:hover': { boxShadow: 'none' } }}>
+      <CardContent sx={{ p: 3 }}>
+        <Box sx={{ fontFamily: MONO_FONT, fontSize: 13, fontWeight: 500, color: brand.deepSignal, mb: 1.5 }}>{index}</Box>
+        <Typography variant="h6" sx={{ mb: 1 }}>{title}</Typography>
         <Typography variant="body2" color="text.secondary">{children}</Typography>
       </CardContent>
     </Card>
@@ -66,8 +91,8 @@ function FeatureCard({ title, children }: { title: string; children: string }) {
 
 const faqs = [
   {
-    q: 'What is The NPG Project?',
-    a: 'The NPG Project is a gateway that lets a licensed Israeli telecom operator exchange number-portability messages with peer operators: eligibility checks, porting requests, updates, cancellations, execution, publication, number return, inquiries, maintenance, and database synchronization.'
+    q: 'What is NPG?',
+    a: 'NPG is a gateway that lets a licensed Israeli telecom operator exchange number-portability messages with peer operators: eligibility checks, porting requests, updates, cancellations, execution, publication, number return, inquiries, maintenance, and database synchronization.'
   },
   {
     q: 'Is raw XML stored anywhere?',
@@ -83,83 +108,81 @@ const faqs = [
   }
 ]
 
+const navLink = { color: brand.mist, '&:hover': { color: brand.paper, bgcolor: 'transparent' } }
+
 export default function LandingPage() {
   return (
-    <Box sx={{ bgcolor: '#FFF', minHeight: '100vh' }}>
-      <AppBar position="static" elevation={0} sx={{ bgcolor: '#FFF', borderBottom: 1, borderColor: 'divider' }}>
-        <Toolbar sx={{ maxWidth: 1200, width: '100%', mx: 'auto' }}>
-          <Typography sx={{ fontFamily: "'Archivo', sans-serif", fontWeight: 700, fontSize: 24, color: 'primary.main', flexGrow: 1 }}>
-            The NPG Project 
-          </Typography>
-          <Button color="inherit" sx={{ color: 'text.secondary', textTransform: 'none' }} href="#features">Features</Button>
-          <Button color="inherit" sx={{ color: 'text.secondary', textTransform: 'none' }} href="#protocol">Protocol</Button>
-          <Button color="inherit" sx={{ color: 'text.secondary', textTransform: 'none' }} href="#faq">FAQ</Button>
-          <Button component={RouterLink} to="/login" variant="contained" sx={{ ml: 2, textTransform: 'none', borderRadius: 2 }}>
+    <Box sx={{ bgcolor: 'background.default', minHeight: '100vh' }}>
+      <Box component="header" sx={{ bgcolor: brand.ink, color: brand.paper }}>
+        <Container maxWidth="lg" sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 2, flexWrap: 'wrap' }}>
+          <Box sx={{ flexGrow: 1 }}>
+            <NpgLockup markSize={40} wordSize={24} surface="dark" />
+          </Box>
+          <Box sx={{ display: { xs: 'none', sm: 'flex' }, gap: 0.5 }}>
+            <Button sx={navLink} href="#features">Features</Button>
+            <Button sx={navLink} href="#protocol">Protocol</Button>
+            <Button sx={navLink} href="#faq">FAQ</Button>
+          </Box>
+          <Button component={RouterLink} to="/login" variant="contained"
+            sx={{ ml: 1, bgcolor: brand.signal, color: brand.ink, '&:hover': { bgcolor: '#67E8F9' } }}>
             Sign in
           </Button>
-        </Toolbar>
-      </AppBar>
+        </Container>
 
-      <Container maxWidth="lg" sx={{ pt: 8, pb: 4 }}>
-        <Grid container spacing={6} alignItems="center">
-          <Grid item xs={12} md={6}>
-            <Chip label="Israeli Number Portability Gateway" size="small" variant="outlined"
-              sx={{ color: 'primary.dark', borderColor: 'primary.light', mb: 2 }} />
-            <Typography variant="h2" sx={{
-              fontFamily: "'Archivo', sans-serif", fontWeight: 700,
-              fontSize: { xs: 34, md: 46 }, lineHeight: 1.1, mb: 2, color: 'text.primary'
-            }}>
-              Every number, exactly where it belongs.
-            </Typography>
-            <Typography variant="body1" color="text.secondary" sx={{ mb: 3, maxWidth: 480 }}>
-              The NPG Project is the portability exchange for licensed operators — requests, responses,
-              executions, and publications over the Israeli NP protocol, with a durable
-              audit trail for every message.
-            </Typography>
-            <Box sx={{ display: 'flex', gap: 2 }}>
-              <Button component={RouterLink} to="/login" variant="contained" size="large"
-                endIcon={<ArrowForwardIcon />} sx={{ textTransform: 'none', borderRadius: 2 }}>
-                Sign in to the console
-              </Button>
-              <Button href="https://github.com/greenfieldtech-nirs/npg.cloudonix.cloud" target="_blank"
-                variant="outlined" size="large" sx={{ textTransform: 'none', borderRadius: 2 }}>
-                View on GitHub
-              </Button>
-            </Box>
+        <Container maxWidth="lg" sx={{ pt: { xs: 6, md: 10 }, pb: { xs: 8, md: 12 } }}>
+          <Grid container spacing={6} alignItems="center">
+            <Grid item xs={12} md={6}>
+              <SectionLabel dark>Israeli number portability</SectionLabel>
+              <Typography variant="h1" sx={{ fontSize: { xs: 38, md: 56 }, lineHeight: 1.1, mb: 3, color: brand.paper }}>
+                Every number, exactly where it belongs.
+              </Typography>
+              <Typography sx={{ fontSize: 18, lineHeight: 1.65, mb: 4, maxWidth: 500, color: brand.mist }}>
+                NPG is the portability exchange for licensed operators: requests, responses, executions and
+                publications over the Israeli NP protocol, with a durable audit trail for every message.
+              </Typography>
+              <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+                <Button component={RouterLink} to="/login" variant="contained" size="large" endIcon={<ArrowForwardIcon />}
+                  sx={{ bgcolor: brand.signal, color: brand.ink, '&:hover': { bgcolor: '#67E8F9' } }}>
+                  Sign in to the console
+                </Button>
+                <Button href={REPO_URL} target="_blank" rel="noopener noreferrer" variant="outlined" size="large"
+                  sx={{ color: brand.paper, borderColor: brand.slate, '&:hover': { borderColor: brand.paper, bgcolor: 'transparent' } }}>
+                  View on GitHub
+                </Button>
+              </Box>
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <Terminal title="peer → npg · inbound Check" code={codeSample} />
+            </Grid>
           </Grid>
-          <Grid item xs={12} md={6}>
-            <CodePanel code={codeSample} />
-            <Box sx={{ mt: 2 }}>
-              <CodePanel code={ackSample} />
-            </Box>
-          </Grid>
-        </Grid>
-      </Container>
+        </Container>
+      </Box>
 
-      <Container maxWidth="lg" sx={{ py: 6 }} id="features">
-        <Typography variant="h5" sx={{ fontFamily: "'Archivo', sans-serif", fontWeight: 600, mb: 1 }}>
+      <Container maxWidth="lg" sx={{ py: { xs: 7, md: 10 } }} id="features">
+        <SectionLabel>01 — What it does</SectionLabel>
+        <Typography variant="h2" sx={{ fontSize: { xs: 28, md: 36 }, mb: 1.5 }}>
           One gateway in front of every portability message.
         </Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 3, maxWidth: 560 }}>
+        <Typography variant="body1" color="text.secondary" sx={{ mb: 4, maxWidth: 620 }}>
           Built for the operator that has to answer to the regulator, the NOC, and the audit team at once.
         </Typography>
-        <Grid container spacing={2}>
+        <Grid container spacing={3}>
           <Grid item xs={12} md={4}>
-            <FeatureCard title="One gateway for every message">
+            <FeatureCard index="// messages" title="One gateway for every message">
               Eligibility checks, porting requests, updates, cancellations, execution,
               publication, number return, inquiries, maintenance, and database
-              synchronization — one inbound endpoint, one outbound pipeline.
+              synchronization: one inbound endpoint, one outbound pipeline.
             </FeatureCard>
           </Grid>
           <Grid item xs={12} md={4}>
-            <FeatureCard title="Durable by design">
-              Every message lands in MariaDB before its ACK is returned — inbox/outbox
+            <FeatureCard index="// durability" title="Durable by design">
+              Every message lands in MariaDB before its ACK is returned: inbox/outbox
               queues with atomic claiming, durable timers, idempotent retries, and
               crash-safe recovery. No external broker required.
             </FeatureCard>
           </Grid>
           <Grid item xs={12} md={4}>
-            <FeatureCard title="Every message, auditable">
+            <FeatureCard index="// audit" title="Every message, auditable">
               Raw XML is stored immutably in MongoDB with SHA-256 hashes, linked to
               workflow state and event history. Manual actions and XML views are
               audit-logged by design.
@@ -168,57 +191,64 @@ export default function LandingPage() {
         </Grid>
       </Container>
 
-      <Box sx={{ bgcolor: 'grey.50', py: 6 }} id="protocol">
+      <Box sx={{ bgcolor: '#FFFFFF', borderTop: `1px solid ${brand.line}`, borderBottom: `1px solid ${brand.line}`, py: { xs: 7, md: 10 } }} id="protocol">
         <Container maxWidth="lg">
           <Grid container spacing={6} alignItems="center">
             <Grid item xs={12} md={5}>
-              <Typography variant="h5" sx={{ fontFamily: "'Archivo', sans-serif", fontWeight: 600, mb: 2 }}>
-                Ask in the language you already ship.
+              <SectionLabel>02 — Protocol</SectionLabel>
+              <Typography variant="h2" sx={{ fontSize: { xs: 28, md: 36 }, mb: 2 }}>
+                Speaks the protocol you already ship.
               </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              <Typography variant="body1" color="text.secondary" sx={{ mb: 2 }}>
                 Protocol XML over HTTPS with header-carried transaction metadata.
                 Technical ACK/NACK is returned synchronously; business responses
-                follow as separate messages — exactly as the specification demands.
+                follow as separate messages, exactly as the specification demands.
               </Typography>
-              <Typography variant="body2" color="text.secondary">
+              <Typography variant="body1" color="text.secondary">
                 Unknown operator codes self-register and are flagged for configuration,
                 so a new peer never blocks the queue.
               </Typography>
             </Grid>
             <Grid item xs={12} md={7}>
-              <CodePanel code={ackSample} />
+              <Terminal title="npg → peer · technical receipt" code={ackSample} />
             </Grid>
           </Grid>
         </Container>
       </Box>
 
-      <Container maxWidth="lg" sx={{ py: 6 }} id="faq">
-        <Typography variant="h5" sx={{ fontFamily: "'Archivo', sans-serif", fontWeight: 600, mb: 2 }}>
-          Questions about number portability
+      <Container maxWidth="md" sx={{ py: { xs: 7, md: 10 } }} id="faq">
+        <SectionLabel>03 — Questions</SectionLabel>
+        <Typography variant="h2" sx={{ fontSize: { xs: 28, md: 36 }, mb: 3 }}>
+          About number portability
         </Typography>
         {faqs.map(item => (
-          <Accordion key={item.q} elevation={0} sx={{ borderBottom: 1, borderColor: 'divider' }}>
-            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-              <Typography variant="subtitle2">{item.q}</Typography>
+          <Accordion key={item.q} elevation={0} disableGutters
+            sx={{ bgcolor: 'transparent', borderBottom: `1px solid ${brand.line}`, '&:before': { display: 'none' } }}>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ px: 0 }}>
+              <Typography variant="subtitle1">{item.q}</Typography>
             </AccordionSummary>
-            <AccordionDetails>
+            <AccordionDetails sx={{ px: 0 }}>
               <Typography variant="body2" color="text.secondary">{item.a}</Typography>
             </AccordionDetails>
           </Accordion>
         ))}
       </Container>
 
-      <Divider />
-      <Container maxWidth="lg" sx={{ py: 3 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
-          <Typography variant="caption" color="text.secondary">
-            NPG Project — Number Portability Gateway · Dual licensed: GPL-3.0 (≤50k numbers) / Commercial
-          </Typography>
-          <Button component={RouterLink} to="/login" size="small" sx={{ textTransform: 'none' }}>
-            Sign in
-          </Button>
-        </Box>
-      </Container>
+      <Box component="footer" sx={{ bgcolor: brand.ink, color: brand.mist }}>
+        <Container maxWidth="lg" sx={{ py: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+            <NpgMark size={32} surface="dark" />
+            <NpgWordmark size={18} surface="dark" />
+            <Typography variant="caption" sx={{ ml: 1 }}>
+              Number Portability Gateway · GPL-3.0 (≤ 50k numbers) / Commercial
+            </Typography>
+          </Box>
+          <Box sx={{ display: 'flex', gap: 2.5, fontFamily: MONO_FONT, fontSize: 13 }}>
+            <Box component="a" href={REPO_URL} target="_blank" rel="noopener noreferrer" sx={{ color: brand.signal }}>github</Box>
+            <Box component={RouterLink} to="/login" sx={{ color: brand.signal }}>sign in</Box>
+          </Box>
+        </Container>
+      </Box>
     </Box>
   )
 }

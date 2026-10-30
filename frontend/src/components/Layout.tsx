@@ -8,6 +8,8 @@ import {
 } from '@mui/material'
 import LogoutIcon from '@mui/icons-material/Logout'
 import { useAuth } from '../auth/AuthContext'
+import { NpgMark, NpgWordmark } from './brand/NpgMark'
+import { brand, MONO_FONT } from '../theme/brand'
 import DashboardIcon from '@mui/icons-material/Dashboard'
 import AccountTreeIcon from '@mui/icons-material/AccountTree'
 import MailOutlineIcon from '@mui/icons-material/MailOutline'
@@ -22,7 +24,7 @@ import QueueIcon from '@mui/icons-material/Queue'
 import ViewListIcon from '@mui/icons-material/ViewList'
 import MapIcon from '@mui/icons-material/Map'
 
-const DRAWER_WIDTH = 240
+const DRAWER_WIDTH = 256
 
 const navItems: { label: string; path: string; icon: JSX.Element; adminOnly?: boolean; operatorOnly?: boolean }[] = [
   { label: 'Dashboard', path: '/', icon: <DashboardIcon fontSize="small" /> },
@@ -64,26 +66,30 @@ export default function Layout({ children }: { children: ReactNode }) {
     <Box sx={{ display: 'flex', bgcolor: 'grey.50', minHeight: '100vh' }}>
       <AppBar position="fixed" sx={{ zIndex: theme => theme.zIndex.drawer + 1 }}>
         <Toolbar>
-          <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
+          <Box component={RouterLink} to="/" aria-label="NPG dashboard"
+            sx={{ display: 'flex', alignItems: 'center', gap: 1.25, textDecoration: 'none', width: DRAWER_WIDTH - 24, flexShrink: 0 }}>
+            <NpgMark size={40} surface="dark" />
+            <NpgWordmark size={22} surface="dark" />
+          </Box>
+          <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1, color: brand.paper }}>
             {pageTitle(location.pathname)}
           </Typography>
-          <Typography variant="subtitle2" color="text.secondary" noWrap sx={{ mr: 2 }}>
-            Number Portability Gateway
-          </Typography>
-          <Chip label="v0.1.0" size="small" variant="outlined" sx={{ color: 'text.secondary', borderColor: 'divider' }} />
+          <Box sx={{ display: { xs: 'none', md: 'flex' }, fontFamily: MONO_FONT, fontSize: 12, borderRadius: '4px', overflow: 'hidden' }}>
+            <Box sx={{ px: 1, py: 0.5, bgcolor: brand.ink2, color: brand.paper }}>npg</Box>
+            <Box sx={{ px: 1, py: 0.5, bgcolor: brand.deepSignal, color: '#FFFFFF' }}>v0.1.0</Box>
+          </Box>
           {user && (
             <>
-              <Typography variant="subtitle2" noWrap sx={{ ml: 2 }}>
+              <Typography variant="subtitle2" noWrap sx={{ ml: 2.5, color: brand.paper }}>
                 {user.displayName}
               </Typography>
               <Chip
                 label={user.roles[0]}
                 size="small"
-                color="primary"
                 variant="outlined"
-                sx={{ ml: 1 }}
+                sx={{ ml: 1, fontFamily: MONO_FONT, fontSize: 11, letterSpacing: '1px', color: brand.signal, borderColor: brand.slate }}
               />
-              <IconButton size="small" onClick={onLogout} aria-label="logout" sx={{ ml: 1 }}>
+              <IconButton size="small" onClick={onLogout} aria-label="logout" sx={{ ml: 1, color: brand.mist, '&:hover': { color: brand.paper } }}>
                 <LogoutIcon fontSize="small" />
               </IconButton>
             </>
@@ -138,7 +144,7 @@ export default function Layout({ children }: { children: ReactNode }) {
           })}
         </List>
       </Drawer>
-      <Box component="main" sx={{ flexGrow: 1, py: 4 }}>
+      <Box component="main" sx={{ flexGrow: 1, minWidth: 0, py: 4 }}>
         <Toolbar />
         <Container maxWidth="lg">{children}</Container>
       </Box>
