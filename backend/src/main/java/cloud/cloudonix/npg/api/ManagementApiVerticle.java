@@ -10,6 +10,7 @@ import cloud.cloudonix.npg.audit.XmlAuditService;
 import cloud.cloudonix.npg.config.DatabaseConfig;
 import cloud.cloudonix.npg.config.MongoConfig;
 import cloud.cloudonix.npg.config.RedisConfig;
+import cloud.cloudonix.npg.numberingplan.NumberingPlanService;
 import cloud.cloudonix.npg.ops.HealthVerticle;
 import cloud.cloudonix.npg.repository.AuditEventRepository;
 import cloud.cloudonix.npg.repository.CachedOperatorRepository;
@@ -57,6 +58,7 @@ public class ManagementApiVerticle extends AbstractVerticle {
     private PortingApiHandler portingApiHandler;
     private ProcessApiHandler processApiHandler;
     private NumberRangeApiHandler numberRangeApiHandler;
+    private NumberingPlanService numberingPlan;
 
     @Override
     public void start(Promise<Void> startPromise) {
@@ -91,6 +93,7 @@ public class ManagementApiVerticle extends AbstractVerticle {
                 portingApiHandler = new PortingApiHandler(new PortingService(services, PortOutPolicy.fromEnvironment()));
                 processApiHandler = new ProcessApiHandler(services);
                 numberRangeApiHandler = new NumberRangeApiHandler(pool);
+                numberingPlan = new NumberingPlanService(vertx, pool);
                 return xmlAuditService.ensureIndexes();
             })
             .compose(v -> {
@@ -195,6 +198,27 @@ public class ManagementApiVerticle extends AbstractVerticle {
         router.post("/api/sync")
             .handler(guard.requireAny("ADMIN", "MANAGER"))
             .handler(ctx -> handleJson(ctx, processApiHandler.requestSync(jsonBody(ctx), ctx.get("actorId"), remoteIp(ctx))));
+
+        router.get("/api/numbering-plan")
+            .handler(guard.authenticated())
+            .handler(ctx -> handleJson(ctx, numberingPlan.ranges(ctx.request().getParam("operator"),
+                ctx.request().getParam("ndc"), ctx.request().getParam("numberType"), ctx.request().getParam("q"))));
+        router.get("/api/numbering-plan/summary")
+            .handler(guard.authenticated())
+            .handler(ctx -> handleJson(ctx, numberingPlan.summary()));
+        router.get("/api/numbering-plan/lookup")
+            .handler(guard.authenticated())
+            .handler(ctx -> handleJson(ctx, numberingPlan.lookup(ctx.request().getParam("number"))));
+        router.post("/api/numbering-plan/import")
+            .handler(guard.requireAny("ADMIN"))
+            .handler(ctx -> {
+                // a text/csv body is an uploaded copy; otherwise fetch the official file
+                String contentType = String.valueOf(ctx.request().getHeader("Content-Type"));
+                boolean upload = contentType.startsWith("text/csv") && ctx.body().length() > 0;
+                handleJson(ctx, upload
+                    ? numberingPlan.importCsv(ctx.body().asString(), "upload", ctx.get("actorId"), remoteIp(ctx))
+                    : numberingPlan.importOfficial(ctx.get("actorId"), remoteIp(ctx)));
+            });
 
         router.get("/api/number-ranges")
             .handler(guard.authenticated())

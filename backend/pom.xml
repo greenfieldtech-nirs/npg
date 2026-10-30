@@ -84,6 +84,18 @@
             <version>${logback.version}</version>
         </dependency>
         <dependency>
+            <!-- Google libphonenumber: number validation, types and formatting (numbering plan) -->
+            <groupId>com.googlecode.libphonenumber</groupId>
+            <artifactId>libphonenumber</artifactId>
+            <version>9.0.41</version>
+        </dependency>
+        <dependency>
+            <!-- area descriptions for geographic numbers -->
+            <groupId>com.googlecode.libphonenumber</groupId>
+            <artifactId>geocoder</artifactId>
+            <version>3.41</version>
+        </dependency>
+        <dependency>
             <groupId>net.logstash.logback</groupId>
             <artifactId>logstash-logback-encoder</artifactId>
             <version>7.4</version>
