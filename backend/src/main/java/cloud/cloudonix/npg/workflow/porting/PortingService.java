@@ -405,7 +405,7 @@ public class PortingService {
             case MANUAL -> support.task(tx, wf, pending.messageId(), DECISION_TASK, ManualTaskRepository.SEVERITY_HIGH,
                 "Decide whether " + wf.phoneNumber() + " may port out (" + pending.messageType() + " "
                     + pending.requestId() + "). Approve or reject it from the workflow page before the recipient's "
-                    + "response deadline.");
+                    + "response deadline." + (decision.reasonText() != null ? " " + decision.reasonText() : ""));
             case APPROVE -> answer(tx, wf, pending, true, null, null);
             case REJECT -> answer(tx, wf, pending, false, decision.reasonCode(), decision.reasonText());
         };

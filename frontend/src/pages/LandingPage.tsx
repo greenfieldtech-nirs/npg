@@ -181,8 +181,8 @@ export default function LandingPage() {
                 follow as separate messages, exactly as the specification demands.
               </Typography>
               <Typography variant="body1" color="text.secondary">
-                Unknown operator codes self-register and are flagged for configuration,
-                so a new peer never blocks the queue.
+                Messages from unknown or unauthenticated operators are refused before they reach
+                any process, and kept in the log so the NOC can see who tried.
               </Typography>
             </Grid>
             <Grid item xs={12} md={7}>

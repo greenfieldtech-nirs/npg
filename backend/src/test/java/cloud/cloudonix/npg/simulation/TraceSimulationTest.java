@@ -265,8 +265,10 @@ class TraceSimulationTest {
         service.receive(f.xml(), TRANSPORT, headers)
             .compose(ack -> {
                 assertEquals(TechnicalAckStatus.ACK, ack.status());
-                // the trace's receiver BZ is this gateway
-                return pool.query("UPDATE np_operators SET is_local = (operator_code = 'BZ')").execute();
+                // the trace's receiver BZ is this gateway, and holds the (masked) number's range
+                return pool.query("UPDATE np_operators SET is_local = (operator_code = 'BZ')").execute()
+                    .compose(u -> pool.query("INSERT INTO np_number_ranges (operator_id, prefix) "
+                        + "SELECT id, '08' FROM np_operators WHERE operator_code = 'BZ'").execute());
             })
             .compose(v -> pool.query("SELECT * FROM np_inbox ORDER BY id DESC LIMIT 1").execute())
             .compose(rows -> {

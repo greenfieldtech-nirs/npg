@@ -42,6 +42,11 @@ public class PortOutPolicy {
             return new Decision(Outcome.MANUAL, null, null);
         }
 
+        /** A NOC decision whatever the mode, with the reason it cannot be automatic. */
+        static Decision manual(String why) {
+            return new Decision(Outcome.MANUAL, null, why);
+        }
+
         static Decision reject(String code, String text) {
             return new Decision(Outcome.REJECT, code, text);
         }
@@ -83,9 +88,16 @@ public class PortOutPolicy {
                 return Future.succeededFuture(Decision.reject("REJECTED_NUMBER_NOT_FOUND",
                     "The number is not served by this operator"));
             }
-            return otherPortInProgress(tx, wf).map(busy -> busy
-                ? Decision.reject("REJECTED_OTHER", "Another porting process for this number is in progress")
-                : byMode());
+            return otherPortInProgress(tx, wf).map(busy -> {
+                if (busy) {
+                    return Decision.reject("REJECTED_OTHER", "Another porting process for this number is in progress");
+                }
+                // no ownership record and no number range: we cannot show the number is ours, so never
+                // approve automatically (fail closed); the NOC decides
+                return owner == null
+                    ? Decision.manual("Neither our records nor the configured number ranges show that we serve this number.")
+                    : byMode();
+            });
         });
     }
 

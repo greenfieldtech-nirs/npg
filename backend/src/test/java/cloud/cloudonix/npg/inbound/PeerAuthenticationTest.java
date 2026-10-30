@@ -143,14 +143,20 @@ class PeerAuthenticationTest {
     }
 
     @Test
-    void unknownSenderIsRefusedButRegisteredForConfiguration(VertxTestContext ctx) {
+    void unknownSenderIsRefusedWithoutChangingAnyState(VertxTestContext ctx) {
         receive("STRANGER", "LOC", "10.20.3.4", null)
             .compose(ack -> {
                 ctx.verify(() -> assertNack(ack, "NACK_UNAUTHORIZED_SENDER"));
-                return pool.query("SELECT requires_configuration FROM np_operators WHERE operator_code = 'STRANGER'").execute();
+                // an unauthenticated request must not create operators (anyone could fill the table)
+                return pool.query("SELECT COUNT(*) AS c FROM np_operators WHERE operator_code = 'STRANGER'").execute();
             })
             .compose(rows -> {
-                ctx.verify(() -> assertTrue(rows.iterator().next().getBoolean("requires_configuration")));
+                ctx.verify(() -> assertEquals(0L, rows.iterator().next().getLong("c")));
+                // but the refused message is kept, so the NOC can see who tried
+                return pool.query("SELECT COUNT(*) AS c FROM np_messages WHERE technical_status = 'REJECTED' AND nack_code = 'NACK_UNAUTHORIZED_SENDER'").execute();
+            })
+            .compose(rows -> {
+                ctx.verify(() -> assertEquals(1L, rows.iterator().next().getLong("c")));
                 return pool.query("SELECT COUNT(*) AS c FROM np_inbox").execute();
             })
             .onComplete(ctx.succeeding(rows -> ctx.verify(() -> {

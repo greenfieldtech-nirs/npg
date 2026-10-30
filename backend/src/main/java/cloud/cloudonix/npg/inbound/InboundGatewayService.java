@@ -88,11 +88,9 @@ public class InboundGatewayService {
 
         return peerAuthenticator.authorize(pool, header, transport).compose(decision -> {
             if (!decision.allowed()) {
-                // unknown codes are still registered so the console can surface them for configuration
-                return pool.withTransaction(tx -> ensureOperatorsExist(tx, header))
-                    .<Void>mapEmpty()
-                    .recover(err -> Future.succeededFuture())
-                    .compose(v -> storeInvalidAndNack(header, rawXml, transport, decision.nackCode(), decision.reason()));
+                // an unauthenticated request changes no state: unknown codes are not registered (an admin
+                // creates operators); the refused message itself is still stored and logged with its codes
+                return storeInvalidAndNack(header, rawXml, transport, decision.nackCode(), decision.reason());
             }
             return acceptDurably(header, rawXml, transport, idempotencyKey)
                 // two identical messages racing past the duplicate check: the unique key decides, and
@@ -141,8 +139,8 @@ public class InboundGatewayService {
     }
 
     /**
-     * Resolves both operator codes to ids, auto-registering unknown codes as "requires configuration"
-     * entries (audited) so operators can review and configure them in the console.
+     * Resolves both operator codes of an accepted (authenticated, or dev-permissive) message to ids,
+     * registering unknown codes as "requires configuration" entries (audited) for the console.
      */
     private Future<java.util.Map<String, Long>> ensureOperatorsExist(SqlClient tx, ProtocolHeader header) {
         OperatorRepository operatorRepository = new OperatorRepository(tx);

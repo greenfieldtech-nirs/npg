@@ -82,6 +82,12 @@ class PortingFlowTest {
             .map(result -> result.getString("workflowUuid"));
     }
 
+    /** As a configured gateway would: our operator holds the number range the test number is in. */
+    private static Future<Void> weHoldTheRange() {
+        return auto.operatorId("LOC").compose(id -> pool.preparedQuery(
+            "INSERT INTO np_number_ranges (operator_id, prefix) VALUES (?, '081')").execute(io.vertx.sqlclient.Tuple.of(id))).mapEmpty();
+    }
+
     // ======================================================================== recipient
 
     @Test
@@ -314,7 +320,7 @@ class PortingFlowTest {
     @Test
     void portOutFollowsTheRecipientThroughToDisconnection(VertxTestContext ctx) {
         String requestId = "NPP1LOC261030000000001";
-        auto.deliver("P1", "Check", requestId, ProtocolHarness.checkBody(PHONE))
+        weHoldTheRange().compose(v -> auto.deliver("P1", "Check", requestId, ProtocolHarness.checkBody(PHONE)))
             .compose(ack -> {
                 ctx.verify(() -> assertEquals(TechnicalAckStatus.ACK, ack.status()));
                 return auto.lastSent("Check_response", "P1");
@@ -358,7 +364,7 @@ class PortingFlowTest {
     void aBurstOfOneProcessIsHandledInArrivalOrder(VertxTestContext ctx) {
         // as in the live trace: Check, Request and Execute arrive before any of them is processed
         String requestId = "NPP1LOC261030000000099";
-        auto.accept("P1", "Check", requestId, ProtocolHarness.checkBody(PHONE))
+        weHoldTheRange().compose(v -> auto.accept("P1", "Check", requestId, ProtocolHarness.checkBody(PHONE)))
             .compose(a -> auto.accept("P1", "Request", requestId, "<portingDateTime>"
                 + java.time.OffsetDateTime.now().plusMinutes(5).withNano(0) + "</portingDateTime>"))
             .compose(a -> auto.accept("P1", "Execute", requestId, ""))
@@ -408,7 +414,7 @@ class PortingFlowTest {
     @Test
     void anotherOperatorCannotDriveSomeoneElsesPortOut(VertxTestContext ctx) {
         String requestId = "NPP1LOC261030000000003";
-        auto.deliver("P1", "Check", requestId, ProtocolHarness.checkBody(PHONE))
+        weHoldTheRange().compose(v -> auto.deliver("P1", "Check", requestId, ProtocolHarness.checkBody(PHONE)))
             // P2 reuses P1's REQUEST_ID to try to execute the port to itself
             .compose(ack -> auto.deliver("P2", "Execute", requestId, ""))
             .compose(ack -> auto.lastSent("Execute_response", "P2"))
@@ -429,7 +435,7 @@ class PortingFlowTest {
     @Test
     void recipientCanCancelAnApprovedPortOut(VertxTestContext ctx) {
         String requestId = "NPP1LOC261030000000004";
-        auto.deliver("P1", "Check", requestId, ProtocolHarness.checkBody(PHONE))
+        weHoldTheRange().compose(v -> auto.deliver("P1", "Check", requestId, ProtocolHarness.checkBody(PHONE)))
             .compose(ack -> auto.deliver("P1", "Cancel", requestId, "<reason>customer withdrew</reason>"))
             .compose(ack -> auto.lastSent("Cancel_response", "P1"))
             .compose(response -> {
@@ -438,6 +444,26 @@ class PortingFlowTest {
             })
             .onComplete(ctx.succeeding(wf -> ctx.verify(() -> {
                 assertEquals("CANCELLED", wf.getString("current_state"));
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void aPortOutOfANumberNotShownToBeOursWaitsForTheNocEvenInAutoMode(VertxTestContext ctx) {
+        // no ownership record and no number range: approving automatically would hand any peer the number
+        String requestId = "NPP1LOC261030000000098";
+        auto.deliver("P1", "Check", requestId, ProtocolHarness.checkBody(PHONE))
+            .compose(ack -> auto.count("SELECT COUNT(*) FROM np_messages WHERE message_type = 'Check_response'"))
+            .compose(responses -> {
+                ctx.verify(() -> assertEquals(0L, responses, "not answered automatically"));
+                return auto.workflow(requestId);
+            })
+            .compose(wf -> {
+                ctx.verify(() -> assertEquals("CHECK_RECEIVED", wf.getString("current_state")));
+                return auto.count("SELECT COUNT(*) FROM np_manual_tasks WHERE task_type = 'PORT_OUT_DECISION' AND status = 'OPEN'");
+            })
+            .onComplete(ctx.succeeding(tasks -> ctx.verify(() -> {
+                assertEquals(1L, tasks, "the NOC decides");
                 ctx.completeNow();
             })));
     }

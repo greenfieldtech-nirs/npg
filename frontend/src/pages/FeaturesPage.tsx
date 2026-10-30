@@ -142,7 +142,7 @@ const groups: Group[] = [
         points: [
           'Mark a peer down to hold its traffic; mark it up to release it',
           'Endpoints with the peer\'s credentials: client-certificate subject and IP allowlist',
-          'Unknown operator codes register themselves and are flagged for configuration'
+          'Messages from unknown or unauthenticated operators are refused, and kept in the log'
         ]
       },
       {

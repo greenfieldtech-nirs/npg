@@ -380,7 +380,7 @@ The final state list must be generated from the protocol extraction phase.
 
 Post-V1 migrations:
 
-- **V2** — `np_operators.requires_configuration BOOLEAN NOT NULL DEFAULT FALSE` — marks operators auto-discovered from inbound messages and pending configuration.
+- **V2** — `np_operators.requires_configuration BOOLEAN NOT NULL DEFAULT FALSE` — marks operators auto-discovered from accepted inbound messages and pending configuration. Refused (unauthenticated) messages never create operators.
 - **V3** — `np_operators.is_local BOOLEAN NOT NULL DEFAULT FALSE` — marks the local operator identity (at most one active at a time, enforced at the application layer).
 - **V4** — `np_users.password_hash VARCHAR(255) NOT NULL DEFAULT ''` — bcrypt hash for console login.
 
