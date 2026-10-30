@@ -74,11 +74,14 @@ Each assumption below is implemented as a configurable placeholder or an isolate
 22. **Number return cooling period** (`RETURN_COOLING_PERIOD`, placeholder 30 days).
 23. **DB synchronization transfer channel.** Still open (FTP/SFTP?). We answer with a reference to a
     snapshot stored in MongoDB (`npg-sync:<id>`); nothing fetches peer files yet.
-24. **Publications for numbers we never recorded.** A third party cannot verify the first-ever
-    publication of another operator's native number unless that operator's number ranges are
-    configured (`np_number_ranges`). Without ranges, such a Publish is accepted from the
-    authenticated publisher when it names a donor. Configure every operator's ranges to close this
-    gap.
+24. **Publications for numbers we never recorded.** The first-ever publication of another
+    operator's native number is verified against who originally holds the number: the configured
+    number ranges (`np_number_ranges`) first, then the imported national numbering plan, through
+    each operator's *numbering plan name* (set by an ADMIN on the Operators page). The plan's most
+    specific range decides; an unmapped holder counts as unknown. A publication that nothing can
+    verify is refused with a `PUBLICATION_CONFLICT` task (fail closed). The same lookup decides
+    whether a port-out is for a number we serve; when it cannot tell, the NOC decides, even in
+    `AUTO_APPROVE` mode.
 25. **Port-out decisions.** The specification leaves the donor's eligibility rules to the
     operator's business (customer identity, contract, debt), and BSS integration is out of scope.
     `PORT_OUT_DECISION_MODE=MANUAL` (production default) hands each decision to the NOC;

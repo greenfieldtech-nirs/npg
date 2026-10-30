@@ -71,6 +71,8 @@ export interface Operator {
   isActive?: boolean;
   isLocal?: boolean;
   requiresConfiguration?: boolean;
+  /** Its "allocated to" name in the national numbering plan, used to verify number ownership */
+  numberingPlanName?: string | null;
 }
 
 export interface OperatorEndpoint {

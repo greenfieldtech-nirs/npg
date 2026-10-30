@@ -192,7 +192,7 @@ paths:
     post: { summary: Create (MANAGER/ADMIN; isLocal requires ADMIN), responses: { '200': { $ref: '#/components/responses/Ok' }, '403': { $ref: '#/components/responses/Forbidden' }, '409': { $ref: '#/components/responses/Conflict' } } }
   /api/operators/{operatorCode}:
     get: { summary: Operator, parameters: [{ name: operatorCode, in: path, required: true, schema: { type: string } }], responses: { '200': { $ref: '#/components/responses/Ok' } } }
-    put: { summary: Update (local identity changes require ADMIN), parameters: [{ name: operatorCode, in: path, required: true, schema: { type: string } }], responses: { '200': { $ref: '#/components/responses/Ok' }, '403': { $ref: '#/components/responses/Forbidden' } } }
+    put: { summary: "Update (local identity and numberingPlanName changes require ADMIN; numberingPlanName maps the operator to its numbering-plan holder, unique)", parameters: [{ name: operatorCode, in: path, required: true, schema: { type: string } }], responses: { '200': { $ref: '#/components/responses/Ok' }, '403': { $ref: '#/components/responses/Forbidden' } } }
   /api/operators/{operatorCode}/mark-down:
     post: { summary: Hold traffic to the operator, parameters: [{ name: operatorCode, in: path, required: true, schema: { type: string } }], requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Reason' } } } }, responses: { '200': { $ref: '#/components/responses/Ok' }, '404': { $ref: '#/components/responses/NotFound' } } }
   /api/operators/{operatorCode}/mark-up:

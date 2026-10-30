@@ -31,7 +31,7 @@ export const families: ProtocolFamily[] = [
         wire: 'confirmed',
         explanation: 'Asks the donor whether a number can be ported. It opens every port-in.',
         sends: 'As recipient, when the NOC starts a port-in (one number or a customer batch). NPG waits for the answer on a durable timer.',
-        receives: 'As donor: opens a port-out, refuses it when the number is served elsewhere or already being ported, then approves automatically or hands the decision to the NOC.',
+        receives: 'As donor: opens a port-out, refuses it when the number is served elsewhere or already being ported, then approves automatically or hands the decision to the NOC. A number we cannot show is ours always goes to the NOC.',
         limitations: ['Mobile numbers use mobile/mobileNumberSingle by analogy; the trace only shows fixed numbers.'],
         example: `# BZ (recipient) asks HL (donor) · body formatted for reading
 ${headers('BZ', 'HL', 'Check', PORT_ID, 'BZ000000000001', 'PORT')}
@@ -296,7 +296,7 @@ ${headers('BZ', 'HL', 'KD_update', PORT_ID, 'BZ000000000005', 'PORT')}
         receives: 'As observer: updates routing only when the claim matches our records or the operators\' number ranges. A contradiction is refused and opens a high-severity task.',
         limitations: [
           'The return form (publishType Return with originalOperator) is inferred; the trace shows port publications.',
-          'A first publication for a number we have no record or range for is accepted from the authenticated publisher; configure every operator\'s ranges.'
+          'A first publication is verified against the configured number ranges, then the imported numbering plan (each operator mapped to its plan name); one nothing can verify is refused with a task for the NOC.'
         ],
         example: `# BZ publishes its port-in to HI (one message per operator)
 ${headers('BZ', 'HI', 'Publish', PORT_ID, 'BZ000000000007', 'PORT')}

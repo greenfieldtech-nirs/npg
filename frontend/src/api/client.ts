@@ -135,7 +135,7 @@ export const operatorApi = {
     api.post(`/operators/${code}/mark-up`, { reason }),
   create: (data: { operatorCode: string; operatorName: string; licenseType?: string; isLocal?: boolean; reason: string }) =>
     api.post<Operator>('/operators', data).then(r => r.data),
-  update: (code: string, data: { operatorName?: string; licenseType?: string; contactName?: string; contactPhone?: string; contactEmail?: string; isActive?: boolean; isLocal?: boolean; reason: string }) =>
+  update: (code: string, data: { operatorName?: string; licenseType?: string; contactName?: string; contactPhone?: string; contactEmail?: string; isActive?: boolean; isLocal?: boolean; numberingPlanName?: string; reason: string }) =>
     api.put<Operator>(`/operators/${code}`, data).then(r => r.data)
 }
 

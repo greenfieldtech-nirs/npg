@@ -45,7 +45,8 @@ It also gives the NOC a console to run and supervise all of it.
   - Brute-force protection: per-IP and per-account limits, plus device-trust cookies.
   - Peer authentication on `/np/inbound`: mTLS subject and/or IP allowlist, receiver must be us.
   - Workflows are bound to their counterparty operator.
-  - Ownership changes are checked against our records and operator number ranges.
+  - Ownership changes are checked against our records, operator number ranges and the national
+    numbering plan; claims nothing can verify are refused.
   - Secure-by-default configuration: production refuses to start with default secrets.
 - **Israel numbering plan.** Imports the Ministry of Communications plan from data.gov.il (or an
   uploaded copy) and classifies every range with Google
@@ -147,9 +148,11 @@ They cover:
    - set this gateway's **local operator** identity;
    - add each peer with its `NPG_INBOUND` endpoint and credential (client-certificate subject
      and/or IP allowlist);
-   - add every operator's **number ranges**;
-   - optionally import the **Israel Numbering Plan** (console → Israel Numbering Plan → Refresh from
-     data.gov.il). The backend needs outbound HTTPS to data.gov.il, or upload a downloaded copy.
+   - import the **Israel Numbering Plan** (console → Israel Numbering Plan → Refresh from
+     data.gov.il; the backend needs outbound HTTPS to data.gov.il, or upload a downloaded copy) and
+     set each operator's **numbering plan name** (Operators → edit). NPG then verifies who
+     originally holds a number from the plan, and refuses publications it cannot verify;
+   - add **number ranges** where you need to override the plan.
 5. Once NGINX verifies client certificates, set `INBOUND_TRUST_PROXY_CLIENT_CERT=true`.
 
 Metrics (Prometheus text) and readiness are served on each container's `HEALTH_PORT` (9090) and

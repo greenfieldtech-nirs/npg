@@ -1,13 +1,13 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { DataGrid, GridColDef } from '@mui/x-data-grid'
-import { operatorApi, endpointApi } from '../api/client'
+import { operatorApi, endpointApi, numberingPlanApi } from '../api/client'
 import { Operator, OperatorEndpoint } from '../api/types'
 import PageHeader from '../components/PageHeader'
 import { useAuth } from '../auth/AuthContext'
 import ReasonDialog from '../components/ReasonDialog'
 import {
-  Alert, Box, Button, Card, CardContent, Chip, Dialog, DialogActions, DialogContent,
+  Alert, Autocomplete, Box, Button, Card, CardContent, Chip, Dialog, DialogActions, DialogContent,
   DialogTitle, Divider, FormControl, FormControlLabel, IconButton, InputLabel, MenuItem,
   Select, Switch, Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography
 } from '@mui/material'
@@ -23,13 +23,14 @@ interface FormState {
   contactName: string
   contactPhone: string
   contactEmail: string
+  numberingPlanName: string
   isActive: boolean
   reason: string
 }
 
 const emptyForm: FormState = {
   operatorCode: '', operatorName: '', licenseType: '',
-  contactName: '', contactPhone: '', contactEmail: '',
+  contactName: '', contactPhone: '', contactEmail: '', numberingPlanName: '',
   isActive: true, reason: ''
 }
 
@@ -167,6 +168,13 @@ export default function OperatorList() {
   const canManagePeers = hasRole('ADMIN', 'MANAGER')
   const { data, isLoading } = useQuery({ queryKey: ['operators'], queryFn: operatorApi.list })
   const [dialog, setDialog] = useState<{ mode: 'create' | 'edit'; form: FormState } | null>(null)
+  // the plan's operator names, for mapping an operator to its numbering-plan holder
+  const planSummary = useQuery({
+    queryKey: ['numberingPlan', 'summary'], queryFn: numberingPlanApi.summary,
+    enabled: isAdmin && dialog?.mode === 'edit'
+  })
+  const planNames = (planSummary.data?.byOperator ?? []).map(o => o.operator)
+    .sort((a, b) => a.localeCompare(b, 'en', { sensitivity: 'base' }))
   const [error, setError] = useState<string | null>(null)
   const [availability, setAvailability] = useState<{ operator: Operator; down: boolean } | null>(null)
 
@@ -186,6 +194,8 @@ export default function OperatorList() {
             contactName: form.contactName || undefined,
             contactPhone: form.contactPhone || undefined,
             contactEmail: form.contactEmail || undefined,
+            // the mapping decides number ownership: only ADMIN may change it (the API enforces this too)
+            ...(isAdmin ? { numberingPlanName: form.numberingPlanName } : {}),
             isActive: form.isActive,
             reason: form.reason
           })
@@ -214,6 +224,7 @@ export default function OperatorList() {
         contactName: op.contactName ?? '',
         contactPhone: op.contactPhone ?? '',
         contactEmail: op.contactEmail ?? '',
+        numberingPlanName: op.numberingPlanName ?? '',
         isActive: op.isActive ?? true,
         reason: ''
       }
@@ -386,6 +397,20 @@ export default function OperatorList() {
                 value={form?.contactEmail ?? ''}
                 onChange={e => setField('contactEmail', e.target.value)}
               />
+              {isAdmin && (
+                <Autocomplete
+                  options={planNames}
+                  value={form?.numberingPlanName || null}
+                  onChange={(_e, v) => setField('numberingPlanName', v ?? '')}
+                  loading={planSummary.isLoading}
+                  renderInput={params => (
+                    <TextField {...params} label="Numbering plan name"
+                      helperText={planNames.length
+                        ? 'Its name in the Israel numbering plan. NPG uses it to verify who originally holds a number when no range is configured.'
+                        : 'Import the Israel numbering plan first to choose a name.'} />
+                  )}
+                />
+              )}
               <FormControlLabel
                 control={
                   <Switch

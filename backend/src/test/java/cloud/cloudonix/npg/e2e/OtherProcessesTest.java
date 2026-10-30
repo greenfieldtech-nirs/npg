@@ -341,6 +341,76 @@ class OtherProcessesTest {
             })));
     }
 
+    /** A plan range (as imported from data.gov.il) and, optionally, the operator mapped to its holder. */
+    private Future<Void> planRange(String nsnPrefix, String allocatedTo, String mappedOperator) {
+        Future<Void> insert = pool.preparedQuery("""
+                INSERT INTO np_numbering_plan (ndc, e164_pattern, national_pattern, nsn_prefix, nsn_length, range_size,
+                                               allocated_to, number_type, libphonenumber_valid)
+                VALUES ('8', '+972 8 X', '08-X', ?, ?, 1000, ?, 'FIXED_LINE', TRUE)
+                """).execute(Tuple.of(nsnPrefix, PHONE.length() - 1, allocatedTo)).mapEmpty();
+        return mappedOperator == null ? insert : insert.compose(v -> pool.preparedQuery(
+            "UPDATE np_operators SET numbering_plan_name = ? WHERE operator_code = ?").execute(Tuple.of(allocatedTo, mappedOperator)).mapEmpty());
+    }
+
+    @Test
+    void aPublicationIsVerifiedAgainstTheNumberingPlan(VertxTestContext ctx) {
+        // no configured range: the imported plan says DON's company holds the number
+        planRange("8123", "DONOR COMPANY LTD", "DON")
+            .compose(v -> h.deliver("P1", "Publish", "NPP1DON261030000000530", publishFor("DON")))
+            .compose(ack -> h.number(PHONE))
+            .compose(number -> {
+                ctx.verify(() -> assertNotNull(number, "applied: the donor is the plan's holder"));
+                return h.lastSent("Publish_response", "P1");
+            })
+            .onComplete(ctx.succeeding(response -> ctx.verify(() -> {
+                assertTrue(response.xml().contains("<approvalInd>Y</approvalInd>"), response.xml());
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void aPublicationNamingSomeoneOtherThanThePlanHolderIsRefused(VertxTestContext ctx) {
+        planRange("8123", "DONOR COMPANY LTD", "DON")
+            .compose(v -> h.deliver("P1", "Publish", "NPP1P2261030000000531", publishFor("P2")))
+            .compose(ack -> h.number(PHONE))
+            .onComplete(ctx.succeeding(number -> ctx.verify(() -> {
+                assertNull(number);
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void anUnmappedPlanHolderNeverFallsBackToABroaderRange(VertxTestContext ctx) {
+        // 81 belongs to DON, but the more specific 8123 to a company no operator is mapped to: unknown
+        planRange("81", "DONOR COMPANY LTD", "DON")
+            .compose(v -> planRange("8123", "SMALL CARRIER LTD", null))
+            .compose(v -> h.deliver("P1", "Publish", "NPP1DON261030000000532", publishFor("DON")))
+            .compose(ack -> h.number(PHONE))
+            .onComplete(ctx.succeeding(number -> ctx.verify(() -> {
+                assertNull(number);
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void anUnverifiablePublicationIsRefusedForTheNoc(VertxTestContext ctx) {
+        // no record, no range, no plan: naming a donor is not enough
+        h.deliver("P1", "Publish", "NPP1DON261030000000533", publishFor("DON"))
+            .compose(ack -> h.number(PHONE))
+            .compose(number -> {
+                ctx.verify(() -> assertNull(number));
+                return h.lastSent("Publish_response", "P1");
+            })
+            .compose(response -> {
+                ctx.verify(() -> assertTrue(response.xml().contains("<negativeApproval>"), response.xml()));
+                return h.count("SELECT COUNT(*) FROM np_manual_tasks WHERE task_type = 'PUBLICATION_CONFLICT' AND status = 'OPEN'");
+            })
+            .onComplete(ctx.succeeding(tasks -> ctx.verify(() -> {
+                assertEquals(1L, tasks);
+                ctx.completeNow();
+            })));
+    }
+
     private Future<Void> range(String prefix, String operator) {
         return h.operatorId(operator).compose(id -> pool.preparedQuery(
             "INSERT INTO np_number_ranges (operator_id, prefix) VALUES (?, ?)").execute(Tuple.of(id, prefix))).mapEmpty();
@@ -404,7 +474,8 @@ class OtherProcessesTest {
     void aStaleCancelPublishCannotRollBackNewerRouting(VertxTestContext ctx) {
         String publish = "<donor>DON</donor><publishType>Port</publishType><fixed><fixedNumberSingle><numberType>S</numberType>"
             + "<number>" + PHONE + "</number></fixedNumberSingle></fixed>";
-        h.deliver("P1", "Publish", "NPP1DON261030000000503", publish)
+        range("081", "DON")
+            .compose(v -> h.deliver("P1", "Publish", "NPP1DON261030000000503", publish))
             // the number then moved on to P2 (a later port we applied)
             .compose(ack -> h.operatorId("P2"))
             .compose(p2 -> pool.preparedQuery("UPDATE np_numbers SET current_operator_id = ? WHERE phone_number = ?")

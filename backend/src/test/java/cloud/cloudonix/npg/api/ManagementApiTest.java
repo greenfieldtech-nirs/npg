@@ -918,6 +918,32 @@ class ManagementApiTest {
             })));
     }
 
+    @Test
+    void numberingPlanMappingIsAdminOnlyAndUnique(VertxTestContext ctx) {
+        pool.query("INSERT INTO np_operators (operator_code, operator_name) VALUES ('MAPA', 'Map A'), ('MAPB', 'Map B')").execute()
+            .compose(v -> seedUser("mapmanager", "manager-password", "MANAGER"))
+            .compose(v -> webClient.put("/api/operators/MAPA").putHeader("Authorization", bearer("mapmanager", "MANAGER"))
+                .sendJsonObject(new JsonObject().put("numberingPlanName", "CARRIER A LTD").put("reason", "map")))
+            .compose(denied -> {
+                // the mapping decides who owns numbers: ADMIN only
+                ctx.verify(() -> assertEquals(403, denied.statusCode()));
+                return webClient.put("/api/operators/MAPA").putHeader("Authorization", adminAuth())
+                    .sendJsonObject(new JsonObject().put("numberingPlanName", "CARRIER A LTD").put("reason", "map"));
+            })
+            .compose(mapped -> {
+                ctx.verify(() -> {
+                    assertEquals(200, mapped.statusCode(), mapped.bodyAsString());
+                    assertEquals("CARRIER A LTD", mapped.bodyAsJsonObject().getString("numberingPlanName"));
+                });
+                return webClient.put("/api/operators/MAPB").putHeader("Authorization", adminAuth())
+                    .sendJsonObject(new JsonObject().put("numberingPlanName", "CARRIER A LTD").put("reason", "map"));
+            })
+            .onComplete(ctx.succeeding(duplicate -> ctx.verify(() -> {
+                assertEquals(409, duplicate.statusCode(), duplicate.bodyAsString());
+                ctx.completeNow();
+            })));
+    }
+
     private static Future<Integer> statusOf(Future<?> attempt) {
         return attempt.map(ok -> 200).recover(e -> Future.succeededFuture(((ApiError) e).status));
     }

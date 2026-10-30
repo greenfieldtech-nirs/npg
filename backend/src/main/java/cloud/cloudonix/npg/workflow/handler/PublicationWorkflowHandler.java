@@ -114,10 +114,10 @@ public class PublicationWorkflowHandler implements WorkflowHandler {
                     ? apply(tx, wf, publish, phone, publisher, nativeOwner, false)
                     : refuse(tx, wf, publish, "The publication must name the number's range holder as donor");
             }
-            // no range data for this number: only accepted when it names a donor (fail closed otherwise)
-            return donor != null
-                ? apply(tx, wf, publish, phone, publisher, donor.id(), false)
-                : refuse(tx, wf, publish, "Unrecognised number range and no donor named");
+            // nothing shows who holds this number (no record, no configured range, no mapped plan range):
+            // the claim cannot be verified, so it is refused and the NOC gets a conflict task (fail closed)
+            return refuse(tx, wf, publish, "Cannot verify the number's original operator: no record, number range "
+                + "or mapped numbering-plan range covers it");
         });
     }
 

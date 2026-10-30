@@ -506,7 +506,10 @@ class PortingFlowTest {
         String publish = "<donor>DON</donor><connectDateTime>2026-09-24T16:50:08+03:00</connectDateTime>"
             + "<publishType>Port</publishType><disconnectDateTime>2026-09-24T16:50:08+03:00</disconnectDateTime>"
             + "<fixed><fixedNumberSingle><numberType>S</numberType><number>" + PHONE + "</number></fixedNumberSingle></fixed>";
-        auto.deliver("P1", "Publish", requestId, publish)
+        // DON holds the number's range, so P1's claim that it ported from DON can be verified
+        auto.operatorId("DON").compose(id -> pool.preparedQuery("INSERT INTO np_number_ranges (operator_id, prefix) VALUES (?, '081')")
+                .execute(io.vertx.sqlclient.Tuple.of(id)))
+            .compose(v -> auto.deliver("P1", "Publish", requestId, publish))
             .compose(ack -> auto.number(PHONE))
             .compose(number -> {
                 ctx.verify(() -> {

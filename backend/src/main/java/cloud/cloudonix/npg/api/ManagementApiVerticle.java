@@ -410,8 +410,8 @@ public class ManagementApiVerticle extends AbstractVerticle {
 
     /**
      * PUT /api/operators/:code gate: any change touching local configuration
-     * (body carries isLocal OR the target operator is currently local) requires ADMIN;
-     * anything else requires MANAGER or ADMIN.
+     * (body carries isLocal OR the target operator is currently local) or number ownership
+     * (numberingPlanName) requires ADMIN; anything else requires MANAGER or ADMIN.
      */
     private void updateOperatorWithLocalConfigGate(RoutingContext ctx) {
         String operatorCode = ctx.pathParam("operatorCode");
@@ -419,7 +419,7 @@ public class ManagementApiVerticle extends AbstractVerticle {
         JwtService.AuthUser user = ctx.get("authUser");
         handleJson(ctx, operatorApiHandler.getOperator(operatorCode)
             .compose(existing -> {
-                boolean localConfigChange = (body != null && body.containsKey("isLocal"))
+                boolean localConfigChange = (body != null && (body.containsKey("isLocal") || body.containsKey("numberingPlanName")))
                     || (existing != null && Boolean.TRUE.equals(existing.getBoolean("isLocal")));
                 boolean isAdmin = user.roles().contains("ADMIN");
                 boolean isManager = user.roles().contains("MANAGER");

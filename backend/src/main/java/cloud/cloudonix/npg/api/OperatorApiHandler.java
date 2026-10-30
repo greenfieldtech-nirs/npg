@@ -80,10 +80,33 @@ public class OperatorApiHandler {
                     .compose(v -> body.containsKey("isLocal")
                         ? setLocalExclusive(operatorCode, Boolean.TRUE.equals(body.getBoolean("isLocal")))
                         : Future.succeededFuture())
+                    .compose(v -> body.containsKey("numberingPlanName")
+                        ? setNumberingPlanName(operatorCode, body.getString("numberingPlanName"))
+                        : Future.succeededFuture())
                     .compose(v -> auditEventRepository.insertAuditEvent("USER", actorId, "OPERATOR_UPDATED",
-                            "OPERATOR", operatorCode, new JsonObject().put("reason", reason).encode(), remoteIp))
+                            "OPERATOR", operatorCode, auditDetails(body, reason).encode(), remoteIp))
                     .compose(v -> getOperator(operatorCode));
             });
+    }
+
+    /** The plan name decides ownership of numbers, so changes are audited with their new value. */
+    private static JsonObject auditDetails(JsonObject body, String reason) {
+        JsonObject details = new JsonObject().put("reason", reason);
+        if (body.containsKey("numberingPlanName")) {
+            details.put("numberingPlanName", body.getValue("numberingPlanName"));
+        }
+        return details;
+    }
+
+    /** Links the operator to its "allocated to" name in the numbering plan; blank clears it. */
+    private Future<Void> setNumberingPlanName(String operatorCode, String planName) {
+        String value = planName == null || planName.isBlank() ? null : planName.trim();
+        return pool.preparedQuery("UPDATE np_operators SET numbering_plan_name = ? WHERE operator_code = ?")
+            .execute(Tuple.of(value, operatorCode))
+            .<Void>mapEmpty()
+            .recover(err -> err instanceof io.vertx.mysqlclient.MySQLException mysql && mysql.getErrorCode() == 1062
+                ? Future.failedFuture(new ApiError(409, "Another operator already uses the numbering plan name: " + value))
+                : Future.failedFuture(err));
     }
 
     /** NOC marks a peer down/up (e.g. it announced maintenance by phone); audited. */
