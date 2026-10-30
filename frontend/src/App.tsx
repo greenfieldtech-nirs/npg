@@ -22,6 +22,7 @@ const NumberRangesPage = lazy(() => import('./pages/NumberRangesPage'))
 const NumberingPlanPage = lazy(() => import('./pages/NumberingPlanPage'))
 const UsersPage = lazy(() => import('./pages/UsersPage'))
 const LocalSetupPage = lazy(() => import('./pages/LocalSetupPage'))
+const FeaturesPage = lazy(() => import('./pages/FeaturesPage'))
 import { guestPage } from './config/appConfig'
 
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -52,6 +53,7 @@ function App() {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/landing" element={<LandingPage />} />
+      <Route path="/features" element={<Suspense fallback={<Loader />}><FeaturesPage /></Suspense>} />
       <Route
         path="*"
         element={
