@@ -14,5 +14,11 @@ export const brand = {
   rejected: { light: '#B42318', dark: '#F87171' }
 } as const
 
+// Dark-mode surfaces between Ink 2 and Slate: borders and raised layers on dark backgrounds
+export const brandDark = {
+  line: '#2B3A50', // borders, dividers on Ink / Ink 2
+  raised: '#24324A' // hover and raised layers on Ink 2
+} as const
+
 export const MONO_FONT = "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace"
 export const SANS_FONT = "'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif"
