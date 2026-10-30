@@ -1,14 +1,21 @@
-import { Box, SxProps, Theme } from '@mui/material'
+import { Box, SxProps, Theme, useTheme } from '@mui/material'
 import { brand, MONO_FONT } from '../../theme/brand'
 
 /** Where the mark sits: Ink tile on light surfaces, Paper tile on dark ones. */
 export type MarkSurface = 'light' | 'dark'
 
+/** An explicit surface (the Ink header, hero, footer) wins; otherwise follow the color mode. */
+function useSurface(surface?: MarkSurface): MarkSurface {
+  const mode = useTheme().palette.mode
+  return surface ?? mode
+}
+
 /**
  * The npg terminal tile, drawn from the brand kit's artwork — never retyped.
  * ≥ 64px: full mark with the signal arrow; 40–63px: simplified tile; < 40px: the >_ prompt glyph.
  */
-export function NpgMark({ size = 64, surface = 'light', title }: { size?: number; surface?: MarkSurface; title?: string }) {
+export function NpgMark({ size = 64, surface: requested, title }: { size?: number; surface?: MarkSurface; title?: string }) {
+  const surface = useSurface(requested)
   const tile = surface === 'light' ? brand.ink : brand.paper
   const text = surface === 'light' ? brand.paper : brand.ink
   const signal = surface === 'light' ? brand.signal : brand.deepSignal
@@ -40,7 +47,8 @@ export function NpgMark({ size = 64, surface = 'light', title }: { size?: number
 }
 
 /** The wordmark: lowercase npg with a blinking-cursor underscore. NPG in prose, npg for the mark. */
-export function NpgWordmark({ size = 24, surface = 'light', sx }: { size?: number; surface?: MarkSurface; sx?: SxProps<Theme> }) {
+export function NpgWordmark({ size = 24, surface: requested, sx }: { size?: number; surface?: MarkSurface; sx?: SxProps<Theme> }) {
+  const surface = useSurface(requested)
   return (
     <Box component="span" sx={{
       fontFamily: MONO_FONT, fontWeight: 700, fontSize: size, lineHeight: 1, letterSpacing: 0,
@@ -52,9 +60,10 @@ export function NpgWordmark({ size = 24, surface = 'light', sx }: { size?: numbe
 }
 
 /** Horizontal lockup: tile, wordmark, and optionally the descriptor. */
-export function NpgLockup({ markSize = 40, wordSize = 24, surface = 'light', descriptor = false }: {
+export function NpgLockup({ markSize = 40, wordSize = 24, surface: requested, descriptor = false }: {
   markSize?: number; wordSize?: number; surface?: MarkSurface; descriptor?: boolean
 }) {
+  const surface = useSurface(requested)
   return (
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
       <NpgMark size={markSize} surface={surface} />

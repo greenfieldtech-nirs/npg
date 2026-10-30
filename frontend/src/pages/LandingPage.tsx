@@ -71,7 +71,7 @@ function FeatureCard({ index, title, children }: { index: string; title: string;
   return (
     <Card sx={{ height: '100%', '&:hover': { boxShadow: 'none' } }}>
       <CardContent sx={{ p: 3 }}>
-        <Box sx={{ fontFamily: MONO_FONT, fontSize: 13, fontWeight: 500, color: brand.deepSignal, mb: 1.5 }}>{index}</Box>
+        <Box sx={{ fontFamily: MONO_FONT, fontSize: 13, fontWeight: 500, color: 'primary.main', mb: 1.5 }}>{index}</Box>
         <Typography variant="h6" sx={{ mb: 1 }}>{title}</Typography>
         <Typography variant="body2" color="text.secondary">{children}</Typography>
       </CardContent>
@@ -167,7 +167,7 @@ export default function LandingPage() {
         </Button>
       </Container>
 
-      <Box sx={{ bgcolor: '#FFFFFF', borderTop: `1px solid ${brand.line}`, borderBottom: `1px solid ${brand.line}`, py: { xs: 7, md: 10 } }} id="protocol">
+      <Box sx={{ bgcolor: 'background.paper', borderTop: 1, borderBottom: 1, borderColor: 'divider', py: { xs: 7, md: 10 } }} id="protocol">
         <Container maxWidth="lg">
           <Grid container spacing={6} alignItems="center">
             <Grid item xs={12} md={5}>
@@ -199,7 +199,7 @@ export default function LandingPage() {
         </Typography>
         {faqs.map(item => (
           <Accordion key={item.q} elevation={0} disableGutters
-            sx={{ bgcolor: 'transparent', borderBottom: `1px solid ${brand.line}`, '&:before': { display: 'none' } }}>
+            sx={{ bgcolor: 'transparent', borderBottom: 1, borderColor: 'divider', '&:before': { display: 'none' } }}>
             <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ px: 0 }}>
               <Typography variant="subtitle1">{item.q}</Typography>
             </AccordionSummary>

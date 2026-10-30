@@ -9,6 +9,7 @@ import {
 import LogoutIcon from '@mui/icons-material/Logout'
 import { useAuth } from '../auth/AuthContext'
 import { NpgMark, NpgWordmark } from './brand/NpgMark'
+import ColorModeToggle from './ColorModeToggle'
 import { brand, MONO_FONT } from '../theme/brand'
 import DashboardIcon from '@mui/icons-material/Dashboard'
 import AccountTreeIcon from '@mui/icons-material/AccountTree'
@@ -56,7 +57,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   }
 
   return (
-    <Box sx={{ display: 'flex', bgcolor: 'grey.50', minHeight: '100vh' }}>
+    <Box sx={{ display: 'flex', bgcolor: 'background.default', minHeight: '100vh' }}>
       <AppBar position="fixed" sx={{ zIndex: theme => theme.zIndex.drawer + 1 }}>
         <Toolbar>
           <Box component={RouterLink} to="/" aria-label="NPG dashboard"
@@ -68,9 +69,10 @@ export default function Layout({ children }: { children: ReactNode }) {
             <Box sx={{ px: 1, py: 0.5, bgcolor: brand.ink2, color: brand.paper }}>npg</Box>
             <Box sx={{ px: 1, py: 0.5, bgcolor: brand.deepSignal, color: '#FFFFFF' }}>v0.1.0</Box>
           </Box>
+          <ColorModeToggle sx={{ ml: 2, color: brand.mist, '&:hover': { color: brand.paper } }} />
           {user && (
             <>
-              <Typography variant="subtitle2" noWrap sx={{ ml: 2.5, color: brand.paper }}>
+              <Typography variant="subtitle2" noWrap sx={{ ml: 1.5, color: brand.paper }}>
                 {user.displayName}
               </Typography>
               <Chip
@@ -116,7 +118,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                   mb: 0.5,
                   color: selected ? 'primary.darker' : 'text.secondary',
                   bgcolor: selected ? 'primary.lighter' : 'transparent',
-                  '&:hover': { bgcolor: selected ? 'primary.lighter' : 'grey.100' },
+                  '&:hover': { bgcolor: selected ? 'primary.lighter' : 'action.hover' },
                   '&.Mui-selected': {
                     color: 'primary.darker',
                     bgcolor: 'primary.lighter',

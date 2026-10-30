@@ -2,16 +2,18 @@
 import { FormEvent, useState } from 'react'
 import { Link as RouterLink, useLocation, useNavigate } from 'react-router-dom'
 import {
-  Alert, Box, Button, IconButton, InputAdornment, InputLabel, Link, OutlinedInput, Stack, Typography
+  Alert, Box, Button, IconButton, InputAdornment, InputLabel, Link, OutlinedInput, Stack, Typography, useTheme
 } from '@mui/material'
 import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined'
 import VisibilityOffOutlinedIcon from '@mui/icons-material/VisibilityOffOutlined'
 import axios from 'axios'
 import { useAuth } from '../auth/AuthContext'
 import { NpgLockup } from '../components/brand/NpgMark'
+import ColorModeToggle from '../components/ColorModeToggle'
 import { REPO_URL } from '../components/site/site'
 import { brand, MONO_FONT } from '../theme/brand'
 import dashboardShot from '../assets/screens/dashboard.webp'
+import dashboardShotDark from '../assets/screens/dark/dashboard.webp'
 
 export default function Login() {
   const { login } = useAuth()
@@ -24,6 +26,7 @@ export default function Login() {
   const [submitting, setSubmitting] = useState(false)
 
   const from = (location.state as { from?: string } | null)?.from ?? '/'
+  const dark = useTheme().palette.mode === 'dark'
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -44,9 +47,10 @@ export default function Login() {
   }
 
   return (
-    <Box sx={{ minHeight: '100vh', display: 'flex', bgcolor: '#FFFFFF' }}>
+    <Box sx={{ minHeight: '100vh', display: 'flex', bgcolor: 'background.paper' }}>
       {/* the form */}
-      <Box sx={{ flex: { xs: 1, md: '0 0 58%' }, display: 'flex', flexDirection: 'column', px: { xs: 3, sm: 6 }, py: { xs: 4, md: 6 } }}>
+      <Box sx={{ flex: { xs: 1, md: '0 0 58%' }, display: 'flex', flexDirection: 'column', position: 'relative', px: { xs: 3, sm: 6 }, py: { xs: 4, md: 6 } }}>
+        <ColorModeToggle sx={{ position: 'absolute', top: 16, right: 16, color: 'text.secondary' }} />
         <Box sx={{ display: { xs: 'flex', md: 'none' }, justifyContent: 'center', mb: 4 }}>
           <NpgLockup markSize={40} wordSize={24} />
         </Box>
@@ -115,7 +119,7 @@ export default function Login() {
         </Box>
 
         <Stack direction="row" spacing={2} justifyContent="center" alignItems="center" sx={{ mt: 4, flexWrap: 'wrap', rowGap: 1 }}
-          divider={<Box sx={{ width: '1px', height: 14, bgcolor: brand.line }} />}>
+          divider={<Box sx={{ width: '1px', height: 14, bgcolor: 'divider' }} />}>
           <Typography variant="body2" color="text.secondary">© {new Date().getFullYear()} NPG</Typography>
           <Link component={RouterLink} to="/landing" variant="body2" color="text.secondary" underline="hover">Home</Link>
           <Link component={RouterLink} to="/features" variant="body2" color="text.secondary" underline="hover">Features</Link>
@@ -126,7 +130,8 @@ export default function Login() {
       {/* the brand panel: lockup, tagline, and the console peeking in from the corner */}
       <Box aria-hidden sx={{
         display: { xs: 'none', md: 'flex' }, flex: 1, flexDirection: 'column', alignItems: 'center', position: 'relative',
-        overflow: 'hidden', bgcolor: brand.ink, color: brand.paper, pt: 7
+        overflow: 'hidden', bgcolor: brand.ink, color: brand.paper, pt: 7,
+        borderLeft: 1, borderColor: theme => theme.palette.mode === 'dark' ? 'divider' : 'transparent'
       }}>
         <NpgLockup markSize={44} wordSize={28} surface="dark" />
         <Typography sx={{ mt: 2.5, px: 6, maxWidth: 520, textAlign: 'center', fontSize: 16, lineHeight: 1.6, color: brand.mist }}>
@@ -139,7 +144,7 @@ export default function Login() {
           border: `6px solid ${brand.ink2}`, borderRight: 0, borderBottom: 0,
           boxShadow: '0px 30px 60px -20px rgba(0, 0, 0, 0.6)'
         }}>
-          <Box component="img" src={dashboardShot} alt="" sx={{ display: 'block', width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'left top' }} />
+          <Box component="img" src={dark ? dashboardShotDark : dashboardShot} alt="" sx={{ display: 'block', width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'left top' }} />
         </Box>
       </Box>
     </Box>

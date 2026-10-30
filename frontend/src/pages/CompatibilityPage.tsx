@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import {
   Box, Button, Card, Container, Grid, Link, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  ToggleButton, ToggleButtonGroup, Typography
+  ToggleButton, ToggleButtonGroup, Typography, useTheme
 } from '@mui/material'
 import { SectionLabel, SiteFooter, SiteHeader } from '../components/site/SiteChrome'
 import { brand, MONO_FONT } from '../theme/brand'
@@ -33,23 +33,29 @@ function WireTag({ wire }: { wire: ProtocolMessage['wire'] }) {
     <Box component="span" title={WIRE[wire].title} sx={{
       display: 'inline-block', px: 1, py: '1px', borderRadius: '4px', whiteSpace: 'nowrap',
       fontFamily: MONO_FONT, fontSize: 11.5, fontWeight: 500,
-      color: wire === 'confirmed' ? brand.deepSignal : brand.slate,
-      border: `1px solid ${wire === 'confirmed' ? brand.deepSignal : brand.line}`
+      color: wire === 'confirmed' ? 'primary.main' : 'text.secondary',
+      border: 1, borderColor: wire === 'confirmed' ? 'primary.main' : 'divider'
     }}>
       {WIRE[wire].label}
     </Box>
   )
 }
 
+/** Status colors have a light and a dark variant in the brand kit. */
+function useLevelColor() {
+  const isDark = useTheme().palette.mode === 'dark'
+  return (level: SupportLevel, onDark = false) => (onDark || isDark ? LEVELS[level].onDark : LEVELS[level].color)
+}
+
 const anchor = (name: string) => `msg-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
 
 function LevelBadge({ level, dark = false }: { level: SupportLevel; dark?: boolean }) {
   const l = LEVELS[level]
+  const color = useLevelColor()(level, dark)
   return (
     <Box component="span" sx={{
       display: 'inline-flex', alignItems: 'center', gap: 0.75, px: 1.25, py: 0.25, borderRadius: '999px', whiteSpace: 'nowrap',
-      fontSize: 13, fontWeight: 600, color: dark ? l.onDark : l.color,
-      border: `1px solid ${dark ? l.onDark : l.color}`
+      fontSize: 13, fontWeight: 600, color, border: `1px solid ${color}`
     }}>
       <span aria-hidden>{l.glyph}</span>{l.label}
     </Box>
@@ -59,7 +65,7 @@ function LevelBadge({ level, dark = false }: { level: SupportLevel; dark?: boole
 /** Headers in Mist, XML tags in Signal, values in Paper — the same terminal look as the landing page. */
 function WireExample({ code, name }: { code: string; name: string }) {
   return (
-    <Box sx={{ borderRadius: '12px', overflow: 'hidden', bgcolor: brand.ink2, border: `1px solid ${brand.ink2}`, height: '100%' }}>
+    <Box sx={{ borderRadius: '12px', overflow: 'hidden', bgcolor: brand.ink2, border: 1, borderColor: theme => theme.palette.mode === 'dark' ? 'divider' : brand.ink2, height: '100%' }}>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, px: 1.75, py: 1, bgcolor: brand.ink }}>
         {[0, 1, 2].map(d => <Box key={d} sx={{ width: 9, height: 9, borderRadius: '50%', bgcolor: brand.slate }} />)}
         <Box sx={{ ml: 1, fontFamily: MONO_FONT, fontSize: 12, color: brand.mist }}>example · {name}</Box>
@@ -90,7 +96,7 @@ function WireExample({ code, name }: { code: string; name: string }) {
 function Role({ title, text }: { title: string; text: string | null }) {
   return (
     <Box sx={{ mb: 1.5 }}>
-      <Typography variant="overline" component="div" sx={{ color: brand.slate, lineHeight: 1.6 }}>{title}</Typography>
+      <Typography variant="overline" component="div" sx={{ color: 'text.secondary', lineHeight: 1.6 }}>{title}</Typography>
       <Typography variant="body2" sx={{ color: text ? 'text.primary' : 'text.secondary' }}>
         {text ?? 'Not applicable: NPG never does this.'}
       </Typography>
@@ -103,7 +109,7 @@ function MessageEntry({ m }: { m: ProtocolMessage }) {
     <Card id={anchor(m.name)} sx={{ p: { xs: 2.5, md: 3 }, scrollMarginTop: 24, '&:hover': { boxShadow: 'none' } }}>
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ xs: 'flex-start', sm: 'center' }} sx={{ mb: 2 }}>
         <Typography component="h3" sx={{ fontFamily: MONO_FONT, fontWeight: 700, fontSize: 20 }}>{m.name}</Typography>
-        <Box sx={{ fontFamily: MONO_FONT, fontSize: 12, color: brand.slate, flexGrow: 1 }}>{m.direction}</Box>
+        <Box sx={{ fontFamily: MONO_FONT, fontSize: 12, color: 'text.secondary', flexGrow: 1 }}>{m.direction}</Box>
         <Stack direction="row" spacing={1} alignItems="center">
           <WireTag wire={m.wire} />
           <LevelBadge level={m.level} />
@@ -116,7 +122,7 @@ function MessageEntry({ m }: { m: ProtocolMessage }) {
           <Role title="When NPG receives it" text={m.receives} />
           {m.limitations && m.limitations.length > 0 && (
             <Box>
-              <Typography variant="overline" component="div" sx={{ color: brand.slate, lineHeight: 1.6 }}>Limitations</Typography>
+              <Typography variant="overline" component="div" sx={{ color: 'text.secondary', lineHeight: 1.6 }}>Limitations</Typography>
               <Box component="ul" sx={{ m: 0, pl: 2.25 }}>
                 {m.limitations.map(l => <Typography component="li" variant="body2" key={l} sx={{ mb: 0.5 }}>{l}</Typography>)}
               </Box>
@@ -133,6 +139,7 @@ function MessageEntry({ m }: { m: ProtocolMessage }) {
 
 export default function CompatibilityPage() {
   const [filter, setFilter] = useState<SupportLevel | 'all'>('all')
+  const levelColor = useLevelColor()
   const all = useMemo(() => families.flatMap(f => f.messages), [])
   const counts = useMemo(() => all.reduce((c, m) => ({ ...c, [m.level]: c[m.level] + 1 }), { full: 0, partial: 0, development: 0 }), [all])
   const visible = (m: ProtocolMessage) => filter === 'all' || m.level === filter
@@ -183,7 +190,7 @@ export default function CompatibilityPage() {
             <TableBody>
               {families.flatMap(f => [
                 <TableRow key={f.id}>
-                  <TableCell colSpan={6} sx={{ bgcolor: brand.paper, fontWeight: 600, py: 1 }}>{f.title}</TableCell>
+                  <TableCell colSpan={6} sx={{ bgcolor: 'background.default', fontWeight: 600, py: 1 }}>{f.title}</TableCell>
                 </TableRow>,
                 ...f.messages.map(m => (
                 <TableRow key={m.name} hover>
@@ -202,7 +209,7 @@ export default function CompatibilityPage() {
         </TableContainer>
       </Container>
 
-      <Box sx={{ bgcolor: '#FFFFFF', borderTop: `1px solid ${brand.line}`, py: { xs: 6, md: 8 } }}>
+      <Box sx={{ bgcolor: 'background.paper', borderTop: 1, borderColor: 'divider', py: { xs: 6, md: 8 } }}>
         <Container maxWidth="lg">
           <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" alignItems={{ md: 'flex-end' }} spacing={2} sx={{ mb: 4 }}>
             <Box>
@@ -214,7 +221,7 @@ export default function CompatibilityPage() {
               <ToggleButton value="all">All ({all.length})</ToggleButton>
               {(Object.keys(LEVELS) as SupportLevel[]).map(level => (
                 <ToggleButton key={level} value={level}>
-                  <Box component="span" aria-hidden sx={{ color: LEVELS[level].color, mr: 0.75 }}>{LEVELS[level].glyph}</Box>
+                  <Box component="span" aria-hidden sx={{ color: levelColor(level), mr: 0.75 }}>{LEVELS[level].glyph}</Box>
                   {LEVELS[level].label} ({counts[level]})
                 </ToggleButton>
               ))}
@@ -235,7 +242,7 @@ export default function CompatibilityPage() {
             )
           })}
 
-          <Card sx={{ p: 3, bgcolor: brand.paper, '&:hover': { boxShadow: 'none' } }}>
+          <Card sx={{ p: 3, bgcolor: 'background.default', '&:hover': { boxShadow: 'none' } }}>
             <Typography variant="h6" sx={{ mb: 1 }}>About these levels</Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
               The support level says what NPG does with a message. The wire format says how sure the XML is:
