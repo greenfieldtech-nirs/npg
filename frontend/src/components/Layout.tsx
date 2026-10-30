@@ -20,6 +20,7 @@ import SwapHorizIcon from '@mui/icons-material/SwapHoriz'
 import HubIcon from '@mui/icons-material/Hub'
 import QueueIcon from '@mui/icons-material/Queue'
 import ViewListIcon from '@mui/icons-material/ViewList'
+import MapIcon from '@mui/icons-material/Map'
 
 const DRAWER_WIDTH = 240
 
@@ -35,6 +36,7 @@ const navItems: { label: string; path: string; icon: JSX.Element; adminOnly?: bo
   { label: 'Local Setup', path: '/settings/local', icon: <HomeWorkIcon fontSize="small" />, adminOnly: true },
   { label: 'Manual Tasks', path: '/manual-tasks', icon: <TaskAltIcon fontSize="small" /> },
   { label: 'Numbers', path: '/numbers', icon: <PinIcon fontSize="small" /> },
+  { label: 'Israel Numbering Plan', path: '/numbering-plan', icon: <MapIcon fontSize="small" /> },
   { label: 'Number Ranges', path: '/number-ranges', icon: <ViewListIcon fontSize="small" />, adminOnly: true }
 ]
 

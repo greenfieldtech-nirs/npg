@@ -19,6 +19,7 @@ const OperatorList = lazy(() => import('./pages/OperatorList'))
 const ManualTaskQueue = lazy(() => import('./pages/ManualTaskQueue'))
 const NumberLookup = lazy(() => import('./pages/NumberLookup'))
 const NumberRangesPage = lazy(() => import('./pages/NumberRangesPage'))
+const NumberingPlanPage = lazy(() => import('./pages/NumberingPlanPage'))
 const UsersPage = lazy(() => import('./pages/UsersPage'))
 const LocalSetupPage = lazy(() => import('./pages/LocalSetupPage'))
 import { guestPage } from './config/appConfig'
@@ -73,6 +74,7 @@ function App() {
                 <Route path="/processes" element={<RequireOperator><ProcessesPage /></RequireOperator>} />
                 <Route path="/queues" element={<QueuesPage />} />
                 <Route path="/number-ranges" element={<RequireAdmin><NumberRangesPage /></RequireAdmin>} />
+                <Route path="/numbering-plan" element={<NumberingPlanPage />} />
               </Routes>
               </Suspense>
             </Layout>

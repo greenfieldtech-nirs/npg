@@ -2,7 +2,7 @@
 import Loader from '../components/Loader'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { Grid, Card, Box, Typography, keyframes, useTheme } from '@mui/material'
+import { Grid, Card, Box, Button, Stack, Typography, keyframes, useTheme } from '@mui/material'
 import AccountTreeIcon from '@mui/icons-material/AccountTree'
 import MoveToInboxIcon from '@mui/icons-material/MoveToInbox'
 import OutboxIcon from '@mui/icons-material/Outbox'
@@ -10,8 +10,12 @@ import TaskAltIcon from '@mui/icons-material/TaskAlt'
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline'
 import CellTowerIcon from '@mui/icons-material/CellTower'
 import ScheduleIcon from '@mui/icons-material/Schedule'
-import { dashboardApi } from '../api/client'
+import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
+import { dashboardApi, numberingPlanApi } from '../api/client'
 import PageHeader from '../components/PageHeader'
+import OperatorAllocationBars from '../components/numberingPlan/OperatorAllocationBars'
+import NumberingPlanImport from '../components/numberingPlan/NumberingPlanImport'
+import { compactCount, fullCount } from '../components/numberingPlan/format'
 
 const rise = keyframes`
   from { opacity: 0; transform: translateY(8px); }
@@ -71,6 +75,66 @@ export default function Dashboard() {
           )
         })}
       </Grid>
+      <NumberingPlanSection />
+    </Box>
+  )
+}
+
+/** The original (non-ported) allocation of Israeli numbers, at a glance. */
+function NumberingPlanSection() {
+  const navigate = useNavigate()
+  const { data } = useQuery({ queryKey: ['numberingPlan', 'summary'], queryFn: numberingPlanApi.summary, staleTime: 5 * 60_000 })
+  if (!data) return null
+  const { totals } = data
+
+  const tiles = [
+    { label: 'Number ranges', value: fullCount(totals.ranges) },
+    { label: 'Operators', value: String(totals.operators) },
+    { label: 'Allocated numbers', value: compactCount(totals.numbers), title: fullCount(totals.numbers) },
+    { label: 'Area codes', value: String(totals.ndcs) }
+  ]
+
+  return (
+    <Box sx={{ mt: 4 }}>
+      <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+        <Box>
+          <Typography variant="h6">Israel Numbering Plan</Typography>
+          <Typography variant="caption" color="text.secondary">
+            Who each number range was originally allocated to, before porting
+          </Typography>
+        </Box>
+        <Button size="small" endIcon={<ArrowForwardIcon />} onClick={() => navigate('/numbering-plan')}>Open plan</Button>
+      </Stack>
+      {totals.ranges === 0 ? (
+        <Card sx={{ p: 2.5 }}>
+          <Typography variant="body2" sx={{ mb: 1.5 }}>
+            The numbering plan has not been imported yet.
+          </Typography>
+          <NumberingPlanImport />
+        </Card>
+      ) : (
+        <Grid container spacing={2.5}>
+          <Grid item xs={12} md={4}>
+            <Grid container spacing={2.5}>
+              {tiles.map(tile => (
+                <Grid item xs={6} key={tile.label}>
+                  <Card sx={{ p: 2.5 }} title={tile.title}>
+                    <Typography variant="h4" sx={{ mb: 0.5, fontVariantNumeric: 'tabular-nums' }}>{tile.value}</Typography>
+                    <Typography variant="caption" color="text.secondary">{tile.label}</Typography>
+                  </Card>
+                </Grid>
+              ))}
+            </Grid>
+          </Grid>
+          <Grid item xs={12} md={8}>
+            <Card sx={{ p: 2, height: '100%' }}>
+              <Typography variant="subtitle2" sx={{ mb: 1, px: 1 }}>Allocated numbers by operator</Typography>
+              <OperatorAllocationBars operators={data.byOperator} limit={8}
+                onSelect={o => navigate(`/numbering-plan?operator=${encodeURIComponent(o)}`)} />
+            </Card>
+          </Grid>
+        </Grid>
+      )}
     </Box>
   )
 }
