@@ -184,3 +184,36 @@ export interface PublicationRecipient {
 export interface NumberRange {
   id: number; prefix: string; description: string | null; operatorCode: string; createdAt: string;
 }
+
+/** One block of the Ministry of Communications numbering plan (the original, non-ported allocation). */
+export interface NumberingPlanRange {
+  id: number; ndc: string; e164Pattern: string; nationalPattern: string; nsnPrefix: string; nsnLength: number;
+  rangeSize: number; allocatedTo: string; notes: string | null; numberType: string; area: string | null;
+  exampleInternational: string | null; exampleNational: string | null; libphonenumberValid: boolean;
+}
+
+export interface NumberingPlanOperatorSummary {
+  operator: string; ranges: number; numbers: number; numberTypes: string | null; ndcs: string | null;
+}
+
+export interface NumberingPlanSummary {
+  totals: { ranges: number; numbers: number; operators: number; ndcs: number; notValidInLibphonenumber: number };
+  byOperator: NumberingPlanOperatorSummary[];
+  byNdc: { ndc: string; ranges: number; numbers: number; operators: number; numberTypes: string | null; area: string | null }[];
+  byType: { numberType: string; ranges: number; numbers: number }[];
+  lastImport: {
+    source: string; sha256: string; rangeCount: number; operatorCount: number; warningsJson: string | null;
+    importedBy: string | null; importedAt: string;
+  } | null;
+  source: string;
+}
+
+export interface NumberingPlanImportResult {
+  ranges: number; operators: number; sha256: string; source: string; warnings: string[]; rangesNotValidInLibphonenumber: number;
+}
+
+export interface NumberingPlanLookup {
+  input: string; e164: string; international: string; national: string; valid: boolean; numberType: string; area: string | null;
+  range: NumberingPlanRange | null;
+  porting: { status: string; lastPortedAt: string | null; currentOperator: string | null; currentOperatorName: string | null } | null;
+}

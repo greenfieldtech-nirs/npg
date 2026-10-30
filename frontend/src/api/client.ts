@@ -1,7 +1,8 @@
 import axios from 'axios'
 import {
   DashboardSummary, Workflow, WorkflowEvent, Message, MessagePair, Operator, OperatorEndpoint, ManualTask, NumberRecord,
-  OwnershipHistoryEntry, SystemUser, OutboxItem, InboxItem, TimerItem, WorkflowMessage, PublicationRecipient, NumberRange
+  OwnershipHistoryEntry, SystemUser, OutboxItem, InboxItem, TimerItem, WorkflowMessage, PublicationRecipient, NumberRange,
+  NumberingPlanRange, NumberingPlanSummary, NumberingPlanImportResult, NumberingPlanLookup
 } from './types'
 
 const api = axios.create({
@@ -171,4 +172,16 @@ export const numberApi = {
   get: (phoneNumber: string) => api.get<NumberRecord>(`/numbers/${phoneNumber}`).then(r => r.data),
   getHistory: (phoneNumber: string) => api.get<OwnershipHistoryEntry[]>(`/numbers/${phoneNumber}/history`).then(r => r.data),
   searchPrefix: (prefix: string) => api.get<NumberRecord[]>('/numbers', { params: { prefix } }).then(r => r.data)
+}
+
+export const numberingPlanApi = {
+  ranges: (params?: { operator?: string; ndc?: string; numberType?: string; q?: string }) =>
+    api.get<NumberingPlanRange[]>('/numbering-plan', { params }).then(r => r.data),
+  summary: () => api.get<NumberingPlanSummary>('/numbering-plan/summary').then(r => r.data),
+  lookup: (number: string) => api.get<NumberingPlanLookup>('/numbering-plan/lookup', { params: { number } }).then(r => r.data),
+  /** Fetches the current plan from data.gov.il on the server. */
+  importOfficial: () => api.post<NumberingPlanImportResult>('/numbering-plan/import').then(r => r.data),
+  /** Imports a copy of the CSV the admin downloaded themselves. */
+  upload: (csv: string) =>
+    api.post<NumberingPlanImportResult>('/numbering-plan/import', csv, { headers: { 'Content-Type': 'text/csv' } }).then(r => r.data)
 }

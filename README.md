@@ -47,6 +47,13 @@ It also gives the NOC a console to run and supervise all of it.
   - Workflows are bound to their counterparty operator.
   - Ownership changes are checked against our records and operator number ranges.
   - Secure-by-default configuration: production refuses to start with default secrets.
+- **Israel numbering plan.** Imports the Ministry of Communications plan from data.gov.il (or an
+  uploaded copy) and classifies every range with Google
+  [libphonenumber](https://github.com/google/libphonenumber). The console shows the original,
+  non-ported allocation of every range and operator, and looks up any number's original operator,
+  libphonenumber type and porting status. Ranges libphonenumber does not recognise (M2M / IoT blocks)
+  are flagged. The plan is reference data: ownership decisions still use the operator number ranges
+  configured in the gateway.
 - **NOC console** (React + MUI):
   - dashboard;
   - workflow search and detail with state-aware actions;
@@ -55,6 +62,7 @@ It also gives the NOC a console to run and supervise all of it.
   - manual task queue;
   - processes: inquiry, return, sync, maintenance;
   - operators, endpoints, number ranges, users and local setup;
+  - the Israel numbering plan, also summarised on the dashboard;
   - message log with an audited raw-XML viewer.
 
 ## Architecture
@@ -111,7 +119,7 @@ create operator `BZ` with **Local** checked (console → Operators, or `POST /ap
 ### Tests
 
 ```bash
-./scripts/dev-test.sh && ./scripts/test-summary.sh   # backend: 215 tests on real MariaDB/MongoDB/Redis
+./scripts/dev-test.sh && ./scripts/test-summary.sh   # backend: 227 tests on real MariaDB/MongoDB/Redis
 ./scripts/frontend-check.sh                          # console: lint, typecheck, production build
 ```
 
@@ -139,7 +147,9 @@ They cover:
    - set this gateway's **local operator** identity;
    - add each peer with its `NPG_INBOUND` endpoint and credential (client-certificate subject
      and/or IP allowlist);
-   - add every operator's **number ranges**.
+   - add every operator's **number ranges**;
+   - optionally import the **Israel Numbering Plan** (console → Israel Numbering Plan → Refresh from
+     data.gov.il). The backend needs outbound HTTPS to data.gov.il, or upload a downloaded copy.
 5. Once NGINX verifies client certificates, set `INBOUND_TRUST_PROXY_CLIENT_CERT=true`.
 
 Metrics (Prometheus text) and readiness are served on each container's `HEALTH_PORT` (9090) and
@@ -166,6 +176,7 @@ with credentials taken from the environment. Runbooks are in `docs/operations/ru
 | `QUEUE_CLAIM_BATCH_SIZE` / `QUEUE_LOCK_SECONDS` | `10` / `60` | queue claiming |
 | `LOGIN_MAX_ATTEMPTS_PER_IP` / `_PER_ACCOUNT` | `20` / `10` | login throttling |
 | `HEALTH_PORT` | `9090` | health and metrics |
+| `NUMBERING_PLAN_URL` | data.gov.il plan | numbering-plan source fetched by "Refresh from data.gov.il" (https outside dev) |
 | `CATALOG_PATH` | `/app/protocol` in the image | protocol model (`docs/protocol`) |
 
 Timer durations and the working calendar are database parameters (`np_system_parameters`,

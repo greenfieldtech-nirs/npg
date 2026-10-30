@@ -9,6 +9,7 @@ import cloud.cloudonix.npg.support.TestMongo;
 import io.vertx.core.DeploymentOptions;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
+import io.vertx.core.buffer.Buffer;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
 import io.vertx.ext.mongo.MongoClient;
@@ -881,6 +882,38 @@ class ManagementApiTest {
                 assertTrue(attributes.contains("httponly"), cookie);
                 assertTrue(attributes.contains("samesite=strict"), cookie);
                 assertTrue(attributes.contains("path=/api/auth"), cookie);
+                ctx.completeNow();
+            })));
+    }
+
+    @Test
+    void numberingPlanUploadIsAdminOnlyAndReadableByEveryone(VertxTestContext ctx) throws IOException {
+        Buffer csv = Buffer.buffer(new String(getClass().getResourceAsStream("/numbering-plan/sample.csv").readAllBytes(),
+            java.nio.charset.StandardCharsets.UTF_8));
+        seedUser("planreader", "reader-password", "USER")
+            .compose(v -> webClient.post("/api/numbering-plan/import").putHeader("Authorization", bearer("planreader", "USER"))
+                .putHeader("Content-Type", "text/csv").sendBuffer(csv))
+            .compose(denied -> {
+                ctx.verify(() -> assertEquals(403, denied.statusCode()));
+                return webClient.post("/api/numbering-plan/import").putHeader("Authorization", adminAuth())
+                    .putHeader("Content-Type", "text/csv").sendBuffer(Buffer.buffer("<html>blocked</html>"));
+            })
+            .compose(garbage -> {
+                ctx.verify(() -> assertEquals(400, garbage.statusCode(), garbage.bodyAsString()));
+                return webClient.post("/api/numbering-plan/import").putHeader("Authorization", adminAuth())
+                    .putHeader("Content-Type", "text/csv").sendBuffer(csv);
+            })
+            .compose(imported -> {
+                ctx.verify(() -> {
+                    assertEquals(200, imported.statusCode(), imported.bodyAsString());
+                    assertEquals(10, imported.bodyAsJsonObject().getInteger("ranges"));
+                });
+                return webClient.get("/api/numbering-plan/lookup?number=%2B972522345678")
+                    .putHeader("Authorization", bearer("planreader", "USER")).send();
+            })
+            .onComplete(ctx.succeeding(lookup -> ctx.verify(() -> {
+                assertEquals(200, lookup.statusCode(), lookup.bodyAsString());
+                assertEquals("CELLCOM ISRAEL LTD", lookup.bodyAsJsonObject().getJsonObject("range").getString("allocatedTo"));
                 ctx.completeNow();
             })));
     }

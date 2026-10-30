@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: NPG Management API
-  version: 0.2.0
+  version: 0.3.0
   description: >
     Management API of the Israeli Number Portability Gateway (JSON). Every route except
     /api/auth/login and /health/* requires a Bearer token from /api/auth/login; the user's current
@@ -211,6 +211,31 @@ paths:
     post: { summary: Add range (ADMIN), requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { operatorCode: { type: string }, prefix: { type: string, example: '0812' }, description: { type: string } } } } } }, responses: { '200': { $ref: '#/components/responses/Ok' }, '409': { $ref: '#/components/responses/Conflict' } } }
   /api/number-ranges/{rangeId}:
     delete: { summary: Remove range (ADMIN), parameters: [{ name: rangeId, in: path, required: true, schema: { type: integer } }], responses: { '200': { $ref: '#/components/responses/Ok' } } }
+  /api/numbering-plan:
+    get:
+      summary: Ranges of the Israeli numbering plan (original, non-ported allocation)
+      parameters:
+        - { name: operator, in: query, schema: { type: string }, description: Exact "allocated to" name }
+        - { name: ndc, in: query, schema: { type: string }, example: '52' }
+        - { name: numberType, in: query, schema: { type: string }, description: libphonenumber PhoneNumberType, example: MOBILE }
+        - { name: q, in: query, schema: { type: string }, description: 'Digits ("03-30", "+972 52 234 5678") match ranges under that prefix or holding that number; other text matches operator or notes' }
+      responses: { '200': { description: 'Ranges: nationalPattern, e164Pattern, nsnPrefix, nsnLength, rangeSize, allocatedTo, notes, numberType, area, exampleNational, exampleInternational, libphonenumberValid' } }
+  /api/numbering-plan/summary:
+    get: { summary: 'Plan totals, numbers per operator / area code / type, and the latest import', responses: { '200': { $ref: '#/components/responses/Ok' } } }
+  /api/numbering-plan/lookup:
+    get:
+      summary: Original allocation, libphonenumber classification and recorded porting status of one number
+      parameters: [{ name: number, in: query, required: true, schema: { type: string }, example: '052-234-5678' }]
+      responses: { '200': { $ref: '#/components/responses/Ok' }, '400': { $ref: '#/components/responses/BadRequest' } }
+  /api/numbering-plan/import:
+    post:
+      summary: Replace the plan (ADMIN) from the official data.gov.il file, or from an uploaded CSV body
+      description: >
+        Without a text/csv body the server fetches NUMBERING_PLAN_URL (the Ministry of Communications file
+        on data.gov.il). A text/csv body imports that copy instead. The file is validated before anything
+        is replaced; the replacement is one transaction and writes a NUMBERING_PLAN_IMPORTED audit event.
+      requestBody: { required: false, content: { text/csv: { schema: { type: string } } } }
+      responses: { '200': { description: 'ranges, operators, sha256, source, warnings[], rangesNotValidInLibphonenumber' }, '400': { $ref: '#/components/responses/BadRequest' }, '403': { $ref: '#/components/responses/Forbidden' }, '502': { description: The official file could not be fetched } }
   /api/users:
     get: { summary: Users (ADMIN), responses: { '200': { $ref: '#/components/responses/Ok' } } }
     post: { summary: Create user (ADMIN), responses: { '200': { $ref: '#/components/responses/Ok' } } }
