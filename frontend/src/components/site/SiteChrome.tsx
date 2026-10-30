@@ -1,6 +1,7 @@
 import { ReactNode } from 'react'
 import { Link as RouterLink } from 'react-router-dom'
-import { Box, Button, Container, Typography } from '@mui/material'
+import { Box, Button, Container, IconButton, Tooltip, Typography } from '@mui/material'
+import GitHubIcon from '@mui/icons-material/GitHub'
 import { NpgLockup, NpgMark, NpgWordmark } from '../brand/NpgMark'
 import { brand, MONO_FONT } from '../../theme/brand'
 import { REPO_URL, signalButton } from './site'
@@ -22,6 +23,12 @@ export function SiteHeader({ children }: { children?: ReactNode }) {
           <Button href="/landing#protocol" sx={navLink}>Protocol</Button>
           <Button href="/landing#faq" sx={navLink}>FAQ</Button>
         </Box>
+        <Tooltip title="NPG on GitHub">
+          <IconButton component="a" href={REPO_URL} target="_blank" rel="noopener noreferrer" aria-label="NPG on GitHub"
+            size="small" sx={{ color: brand.mist, '&:hover': { color: brand.paper } }}>
+            <GitHubIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
         <ColorModeToggle sx={{ color: brand.mist, '&:hover': { color: brand.paper } }} />
         <Button component={RouterLink} to="/login" variant="contained" sx={{ ml: 1, ...signalButton }}>
           Sign in
