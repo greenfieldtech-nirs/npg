@@ -36,8 +36,8 @@ const navItems: { label: string; path: string; icon: JSX.Element; adminOnly?: bo
   { label: 'Local Setup', path: '/settings/local', icon: <HomeWorkIcon fontSize="small" />, adminOnly: true },
   { label: 'Manual Tasks', path: '/manual-tasks', icon: <TaskAltIcon fontSize="small" /> },
   { label: 'Numbers', path: '/numbers', icon: <PinIcon fontSize="small" /> },
-  { label: 'Israel Numbering Plan', path: '/numbering-plan', icon: <MapIcon fontSize="small" /> },
-  { label: 'Number Ranges', path: '/number-ranges', icon: <ViewListIcon fontSize="small" />, adminOnly: true }
+  { label: 'Number Ranges', path: '/number-ranges', icon: <ViewListIcon fontSize="small" />, adminOnly: true },
+  { label: 'Israel Numbering Plan', path: '/numbering-plan', icon: <MapIcon fontSize="small" /> }
 ]
 
 function pageTitle(pathname: string): string {
@@ -106,17 +106,7 @@ export default function Layout({ children }: { children: ReactNode }) {
         }}
       >
         <Toolbar />
-        <Box sx={{ px: 2.5, py: 3 }}>
-          <Typography
-            sx={{ fontFamily: "'Archivo', sans-serif", fontWeight: 700, fontSize: 24, color: 'primary.main', lineHeight: 1 }}
-          >
-            NPG
-          </Typography>
-          <Typography variant="caption" color="text.secondary">
-            Number Portability Gateway
-          </Typography>
-        </Box>
-        <List sx={{ px: 1.5 }}>
+        <List sx={{ px: 1.5, pt: 2 }}>
           {navItems.filter(item => (!item.adminOnly || isAdmin) && (!item.operatorOnly || isOperator)).map(item => {
             const selected = location.pathname === item.path
             return (

@@ -66,13 +66,14 @@ export default function NumberingPlanPage() {
   if (summary.error) return <Alert severity="error">{apiErrorMessage(summary.error)}</Alert>
   const plan = summary.data!
   const imported = plan.totals.ranges > 0
+  const operatorNames = plan.byOperator.map(o => o.operator).sort((a, b) => a.localeCompare(b, 'en', { sensitivity: 'base' }))
 
   const columns: GridColDef<NumberingPlanRange>[] = [
     { field: 'nationalPattern', headerName: 'National', width: 125 },
     { field: 'e164Pattern', headerName: 'E.164', width: 145 },
     { field: 'allocatedTo', headerName: 'Allocated to', flex: 1, minWidth: 200 },
     {
-      field: 'numberType', headerName: 'Type', width: 150,
+      field: 'numberType', headerName: 'Type', width: 195,
       renderCell: p => p.row.libphonenumberValid
         ? numberTypeLabel(p.row.numberType)
         : (
@@ -164,7 +165,7 @@ export default function NumberingPlanPage() {
                   <InputLabel>Operator</InputLabel>
                   <Select label="Operator" value={operator} onChange={e => setFilter('operator', e.target.value)}>
                     <MenuItem value="">All operators</MenuItem>
-                    {plan.byOperator.map(o => <MenuItem key={o.operator} value={o.operator}>{o.operator}</MenuItem>)}
+                    {operatorNames.map(name => <MenuItem key={name} value={name}>{name}</MenuItem>)}
                   </Select>
                 </FormControl>
                 <FormControl size="small" sx={{ minWidth: 160 }}>
