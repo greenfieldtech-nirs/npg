@@ -18,6 +18,9 @@ import java.util.concurrent.TimeUnit;
  */
 public class PlatformHealthService {
 
+    private static final io.vertx.core.impl.logging.Logger LOG =
+        io.vertx.core.impl.logging.LoggerFactory.getLogger(PlatformHealthService.class);
+
     static final List<String> ROLES = List.of("api", "inbound", "worker", "timer", "dispatcher");
     /** Work due for longer than this means a role is not keeping up. */
     static final int LAG_DEGRADED_SECONDS = 300;
@@ -80,7 +83,15 @@ public class PlatformHealthService {
         JsonObject result = new JsonObject().put("name", name).put("critical", critical);
         return probe.get().timeout(CHECK_TIMEOUT_MS, TimeUnit.MILLISECONDS)
             .map(v -> result.put("status", "UP").put("latencyMs", (System.nanoTime() - start) / 1_000_000))
-            .otherwise(err -> result.put("status", "DOWN").put("error", String.valueOf(err.getMessage())));
+            .otherwise(err -> {
+                // driver errors can name hosts, ports or connection details: log them, show only the category
+                LOG.warn("Health check of " + name + " failed: " + err.getMessage());
+                return result.put("status", "DOWN").put("error", isTimeout(err) ? "timeout" : "unreachable");
+            });
+    }
+
+    private static boolean isTimeout(Throwable err) {
+        return err instanceof java.util.concurrent.TimeoutException || err.getClass().getSimpleName().contains("Timeout");
     }
 
     /** Per role: UP when a process serving it reported recently, STALE when all went quiet, MISSING when none ever did. */

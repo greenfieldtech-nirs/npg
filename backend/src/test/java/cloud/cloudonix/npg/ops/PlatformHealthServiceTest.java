@@ -114,6 +114,8 @@ class PlatformHealthServiceTest {
             .compose(health -> {
                 ctx.verify(() -> {
                     assertEquals("DOWN", store(health, "redis").getString("status"));
+                    // never the driver's message (hosts, ports, connection details)
+                    assertEquals("unreachable", store(health, "redis").getString("error"));
                     assertEquals("DEGRADED", health.getString("status"), "redis is not critical");
                 });
                 return new PlatformHealthService(pool, mongo, null).check();
