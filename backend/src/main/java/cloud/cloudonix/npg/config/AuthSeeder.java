@@ -40,8 +40,12 @@ public final class AuthSeeder {
             }
             return configured;
         }
+        // the length (never the value) tells a missing variable from one Compose shortened
         throw new IllegalStateException("NPG_ADMIN_PASSWORD must be set to at least " + MIN_ADMIN_PASSWORD_LENGTH
-            + " characters to create the initial admin user (set NPG_ENV=dev to use the dev default)");
+            + " characters to create the initial admin user; it is "
+            + (configured == null ? "not set" : configured.length() + " characters")
+            + ". Docker Compose expands $ in docker/.env.production: write $$ for a literal $ (or single-quote the value)"
+            + " (set NPG_ENV=dev to use the dev default)");
     }
 
     public static Future<Void> ensureSeeded(Pool pool) {

@@ -64,7 +64,10 @@ class SecurityConfigTest {
     void productionRefusesDefaultAdminPassword() {
         System.setProperty("NPG_ENV", "production");
         assertThrows(IllegalStateException.class, () -> AuthSeederAccess.initialAdminPassword(null));
-        assertThrows(IllegalStateException.class, () -> AuthSeederAccess.initialAdminPassword("short"));
+        IllegalStateException tooShort = assertThrows(IllegalStateException.class, () -> AuthSeederAccess.initialAdminPassword("short"));
+        // says how long the value that arrived is, never the value itself
+        assertTrue(tooShort.getMessage().contains("it is 5 characters"), tooShort.getMessage());
+        assertFalse(tooShort.getMessage().contains("short."), tooShort.getMessage());
         assertEquals("a-long-enough-password", AuthSeederAccess.initialAdminPassword("a-long-enough-password"));
     }
 
