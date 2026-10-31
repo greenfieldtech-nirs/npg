@@ -219,3 +219,25 @@ export interface NumberingPlanLookup {
   range: NumberingPlanRange | null;
   porting: { status: string; lastPortedAt: string | null; currentOperator: string | null; currentOperatorName: string | null } | null;
 }
+
+export type HealthStatus = 'UP' | 'DOWN' | 'DEGRADED' | 'STALE' | 'MISSING' | 'DISABLED'
+
+/** GET /api/platform-health */
+export interface PlatformHealth {
+  status: 'UP' | 'DEGRADED' | 'DOWN'
+  stores: { name: string; critical: boolean; status: HealthStatus; latencyMs?: number; error?: string }[]
+  roles: {
+    role: string
+    status: HealthStatus
+    instances: { hostname: string | null; role: string; lastSeenSecondsAgo: number; startedAt: string }[]
+  }[]
+  queues: {
+    inbox: { due: number; oldestDueSeconds: number }
+    outbox: { due: number; oldestDueSeconds: number }
+    timersOverdue: number
+    oldestOverdueSeconds: number
+    outboxNeedingReview: number
+  } | null
+  peers: { active: number; down: number } | null
+  checkedAt: string
+}

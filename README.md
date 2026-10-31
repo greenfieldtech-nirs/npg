@@ -57,7 +57,8 @@ It also gives the NOC a console to run and supervise all of it.
   are flagged. The plan is reference data: ownership decisions still use the operator number ranges
   configured in the gateway.
 - **NOC console** (React + MUI):
-  - dashboard;
+  - dashboard slide show: operations, the numbering plan, and platform health (stores, every runtime
+    role from its heartbeat, backlog, peers);
   - workflow search and detail with state-aware actions;
   - start port-in;
   - queues and timers with retry / mark-delivered / cancel / fire-now;

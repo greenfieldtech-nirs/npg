@@ -78,7 +78,7 @@ public class TestDatabase {
     private static final String[] BUSINESS_TABLES = {
         "np_manual_task_notes", "np_manual_tasks", "np_timers", "np_publication_recipients", "np_workflow_events",
         "np_inbox", "np_outbox", "np_messages", "np_number_ownership_history", "np_numbers", "np_workflows",
-        "np_audit_events", "np_number_ranges", "np_numbering_plan", "np_numbering_plan_imports"
+        "np_audit_events", "np_number_ranges", "np_numbering_plan", "np_numbering_plan_imports", "np_instance_heartbeats"
     };
 
     /** Deletes all workflow, queue, message and number data (DELETE, so FK checks stay on). */

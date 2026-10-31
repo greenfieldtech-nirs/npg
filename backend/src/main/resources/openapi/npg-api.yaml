@@ -211,6 +211,16 @@ paths:
     post: { summary: Add range (ADMIN), requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { operatorCode: { type: string }, prefix: { type: string, example: '0812' }, description: { type: string } } } } } }, responses: { '200': { $ref: '#/components/responses/Ok' }, '409': { $ref: '#/components/responses/Conflict' } } }
   /api/number-ranges/{rangeId}:
     delete: { summary: Remove range (ADMIN), parameters: [{ name: rangeId, in: path, required: true, schema: { type: integer } }], responses: { '200': { $ref: '#/components/responses/Ok' } } }
+  /api/platform-health:
+    get:
+      summary: Health of every platform component (any authenticated user)
+      description: >
+        Data stores (MariaDB, MongoDB, Redis; each with latency, Redis non-critical and possibly DISABLED),
+        runtime roles from process heartbeats (UP, STALE when silent for over 60 s, MISSING), the due
+        backlog of inbox/outbox, overdue timers, outbox items in review, and peer availability. Overall
+        status: DOWN when a critical store or a role is not up, DEGRADED when the cache is down or work
+        is piling up (overdue timers, due work older than 5 minutes).
+      responses: { '200': { $ref: '#/components/responses/Ok' } }
   /api/numbering-plan:
     get:
       summary: Ranges of the Israeli numbering plan (original, non-ported allocation)

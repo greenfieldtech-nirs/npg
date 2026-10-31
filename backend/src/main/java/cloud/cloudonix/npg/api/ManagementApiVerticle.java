@@ -59,6 +59,7 @@ public class ManagementApiVerticle extends AbstractVerticle {
     private ProcessApiHandler processApiHandler;
     private NumberRangeApiHandler numberRangeApiHandler;
     private NumberingPlanService numberingPlan;
+    private cloud.cloudonix.npg.ops.PlatformHealthService platformHealth;
 
     @Override
     public void start(Promise<Void> startPromise) {
@@ -94,6 +95,7 @@ public class ManagementApiVerticle extends AbstractVerticle {
                 processApiHandler = new ProcessApiHandler(services);
                 numberRangeApiHandler = new NumberRangeApiHandler(pool);
                 numberingPlan = new NumberingPlanService(vertx, pool);
+                platformHealth = new cloud.cloudonix.npg.ops.PlatformHealthService(pool, mongo, redisFuture.result());
                 return xmlAuditService.ensureIndexes();
             })
             .compose(v -> {
@@ -199,6 +201,9 @@ public class ManagementApiVerticle extends AbstractVerticle {
             .handler(guard.requireAny("ADMIN", "MANAGER"))
             .handler(ctx -> handleJson(ctx, processApiHandler.requestSync(jsonBody(ctx), ctx.get("actorId"), remoteIp(ctx))));
 
+        router.get("/api/platform-health")
+            .handler(guard.authenticated())
+            .handler(ctx -> handleJson(ctx, platformHealth.check()));
         router.get("/api/numbering-plan")
             .handler(guard.authenticated())
             .handler(ctx -> handleJson(ctx, numberingPlan.ranges(ctx.request().getParam("operator"),

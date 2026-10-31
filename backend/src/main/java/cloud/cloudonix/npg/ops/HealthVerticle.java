@@ -21,6 +21,9 @@ import io.vertx.sqlclient.Row;
  */
 public class HealthVerticle extends AbstractVerticle {
 
+    private static final io.vertx.core.impl.logging.Logger LOG =
+        io.vertx.core.impl.logging.LoggerFactory.getLogger(HealthVerticle.class);
+
     private Pool pool;
     private MongoClient mongo;
 
@@ -36,10 +39,22 @@ public class HealthVerticle extends AbstractVerticle {
                 router.get("/health/live").handler(ctx -> ctx.response().end("OK"));
                 router.get("/health/ready").handler(this::ready);
                 router.get("/metrics").handler(this::metrics);
+                startHeartbeat();
                 return vertx.createHttpServer().requestHandler(router).listen(Env.getInt("HEALTH_PORT", 9090));
             })
             .<Void>mapEmpty()
             .onComplete(startPromise);
+    }
+
+    /** Reports this process (its role and host) every 15 s for the console's Platform Health view. */
+    private void startHeartbeat() {
+        String instanceId = java.util.UUID.randomUUID().toString();
+        String role = Env.get("APP_ROLE", "all");
+        String hostname = Env.get("HOSTNAME", "unknown");
+        Runnable beat = () -> Heartbeats.beat(pool, instanceId, role, hostname)
+            .onFailure(err -> LOG.warn("Heartbeat failed: " + err.getMessage()));
+        beat.run();
+        vertx.setPeriodic(Heartbeats.INTERVAL_MS, id -> beat.run());
     }
 
     private void ready(RoutingContext ctx) {

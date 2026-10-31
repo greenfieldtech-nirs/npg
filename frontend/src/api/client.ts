@@ -2,7 +2,7 @@ import axios from 'axios'
 import {
   DashboardSummary, Workflow, WorkflowEvent, Message, MessagePair, Operator, OperatorEndpoint, ManualTask, NumberRecord,
   OwnershipHistoryEntry, SystemUser, OutboxItem, InboxItem, TimerItem, WorkflowMessage, PublicationRecipient, NumberRange,
-  NumberingPlanRange, NumberingPlanSummary, NumberingPlanImportResult, NumberingPlanLookup
+  NumberingPlanRange, NumberingPlanSummary, NumberingPlanImportResult, NumberingPlanLookup, PlatformHealth
 } from './types'
 
 const api = axios.create({
@@ -43,7 +43,8 @@ export const authApi = {
 }
 
 export const dashboardApi = {
-  getSummary: () => api.get<DashboardSummary>('/dashboard').then(r => r.data)
+  getSummary: () => api.get<DashboardSummary>('/dashboard').then(r => r.data),
+  platformHealth: () => api.get<PlatformHealth>('/platform-health').then(r => r.data)
 }
 
 /** Human-readable message from an API error ({"error": "..."} bodies), for alerts. */
