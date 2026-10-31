@@ -25,6 +25,7 @@ public class Application {
     public static void main(String[] args) {
         try {
             // fail fast on unsafe auth configuration before touching anything else
+            cloud.cloudonix.npg.config.ProductionSecrets.check();
             cloud.cloudonix.npg.security.JwtService.fromEnvironment();
         } catch (IllegalStateException e) {
             log.error("Refusing to start: " + e.getMessage());

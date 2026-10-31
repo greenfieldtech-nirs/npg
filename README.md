@@ -142,7 +142,10 @@ They cover:
 ## Production
 
 1. Copy `docker/.env.production.example` to `docker/.env.production` and fill in every `REQUIRED`
-   value. The stack refuses to start without them: production never runs with default secrets.
+   value. The stack refuses to start without them, or while any still holds the example placeholder:
+   production never runs with default secrets. The first admin account is `NPG_ADMIN_USERNAME`
+   (default `admin`) with the password you set in `NPG_ADMIN_PASSWORD` (at least 12 characters);
+   there is no built-in production password.
 2. Put the stack behind your load balancer. The LB terminates TLS and forwards plain HTTP to
    NGINX on **port 8090**, which serves everything: the console, `/api`, the operators' `/np`
    gateway and the `/health/live` health check. NGINX takes the client IP from the load
