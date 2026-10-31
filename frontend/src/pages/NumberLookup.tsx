@@ -9,6 +9,8 @@ import axios from 'axios'
 import { numberApi } from '../api/client'
 import { NumberRecord } from '../api/types'
 import PageHeader from '../components/PageHeader'
+import ActionCard from '../components/ActionCard'
+import PinIcon from '@mui/icons-material/Pin'
 import { Box } from '@mui/material'
 
 function statusColor(status: string): 'success' | 'info' | 'default' {
@@ -66,17 +68,23 @@ export default function NumberLookup() {
   return (
     <Box>
       <PageHeader title="Number Lookup" subtitle="Query routing and portability for a number" />
-      <Card>
+      <ActionCard
+        icon={<PinIcon />}
+        title="Look up a number"
+        help="This gateway's routing record for a number, with its ownership history. A partial number lists the numbers that start with it."
+        actions={<Button variant="contained" disabled={!phone.trim()} onClick={submit}>Look up</Button>}
+      >
+        <TextField
+          label="Phone number or prefix"
+          fullWidth
+          value={phone}
+          onChange={e => setPhone(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') submit() }}
+        />
+      </ActionCard>
+      {query && (
+      <Card sx={{ mt: 2.5 }}>
         <CardContent>
-          <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
-            <TextField
-              label="Phone Number or prefix"
-              value={phone}
-              onChange={e => setPhone(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') submit() }}
-            />
-            <Button variant="contained" onClick={submit}>Lookup</Button>
-          </Box>
 
           {isLoading && <Loader />}
 
@@ -171,6 +179,7 @@ export default function NumberLookup() {
           )}
         </CardContent>
       </Card>
+      )}
     </Box>
   )
 }

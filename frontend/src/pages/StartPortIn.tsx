@@ -7,6 +7,8 @@ import {
 } from '@mui/material'
 import { apiErrorMessage, operatorApi, portingApi } from '../api/client'
 import PageHeader from '../components/PageHeader'
+import ActionCard from '../components/ActionCard'
+import SwapHorizIcon from '@mui/icons-material/SwapHoriz'
 
 interface BatchResult { phoneNumber: string; workflowUuid?: string; error?: string }
 
@@ -52,49 +54,50 @@ export default function StartPortIn() {
   return (
     <Box>
       <PageHeader title="Start Port-In" subtitle="Bring numbers over from another operator (this gateway is the recipient)" />
-      <Card>
-        <CardContent>
-          {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
-          <Grid container spacing={2}>
-            <Grid item xs={12}>
-              <TextField label="Phone numbers" fullWidth multiline minRows={2} value={numbers}
-                onChange={e => setNumbers(e.target.value)}
-                helperText="One or more national numbers (05XXXXXXXX), separated by spaces, commas or new lines" />
-            </Grid>
-            <Grid item xs={12} sm={4}>
-              <FormControl fullWidth>
-                <InputLabel>Number type</InputLabel>
-                <Select label="Number type" value={numberType} onChange={e => setNumberType(e.target.value)}>
-                  <MenuItem value="MOBILE">Mobile</MenuItem>
-                  <MenuItem value="FIXED">Fixed</MenuItem>
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12} sm={4}>
-              <FormControl fullWidth>
-                <InputLabel>Donor operator</InputLabel>
-                <Select label="Donor operator" value={donor} onChange={e => setDonor(e.target.value)}>
-                  {peers.map(o => <MenuItem key={o.operatorCode} value={o.operatorCode}>{o.operatorCode} — {o.operatorName}</MenuItem>)}
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12} sm={4}>
-              <TextField label="Customer identification" fullWidth value={identification}
-                onChange={e => setIdentification(e.target.value)} helperText="ID number sent with the Check" />
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <TextField type="datetime-local" label="Requested port time (optional)" fullWidth InputLabelProps={{ shrink: true }}
-                value={portTime} onChange={e => setPortTime(e.target.value)}
-                helperText="Default: shortly after the donor approves" />
-            </Grid>
+      <ActionCard
+        icon={<SwapHorizIcon />}
+        title="Port numbers in"
+        subtitle="Check → Request → Execute"
+        help="The donor is asked first (Check). Once it approves, NPG sends the Request and executes the port at the approved time on its own."
+        actions={
+          <Button variant="contained" disabled={busy || phoneNumbers.length === 0 || !donor} onClick={submit}>
+            Send Check{phoneNumbers.length > 1 ? ` (${phoneNumbers.length} numbers)` : ''}
+          </Button>
+        }
+      >
+        {error && <Alert severity="error">{error}</Alert>}
+        <TextField label="Phone numbers" fullWidth multiline minRows={2} value={numbers}
+          onChange={e => setNumbers(e.target.value)}
+          helperText="One or more national numbers (05XXXXXXXX), separated by spaces, commas or new lines" />
+        <Grid container spacing={2}>
+          <Grid item xs={12} sm={6} md={3}>
+            <FormControl fullWidth>
+              <InputLabel id="port-in-type">Number type</InputLabel>
+              <Select labelId="port-in-type" label="Number type" value={numberType} onChange={e => setNumberType(e.target.value)}>
+                <MenuItem value="MOBILE">Mobile</MenuItem>
+                <MenuItem value="FIXED">Fixed</MenuItem>
+              </Select>
+            </FormControl>
           </Grid>
-          <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end' }}>
-            <Button variant="contained" disabled={busy || phoneNumbers.length === 0 || !donor} onClick={submit}>
-              Send Check{phoneNumbers.length > 1 ? ` (${phoneNumbers.length} numbers)` : ''}
-            </Button>
-          </Box>
-        </CardContent>
-      </Card>
+          <Grid item xs={12} sm={6} md={3}>
+            <FormControl fullWidth>
+              <InputLabel id="port-in-donor">Donor operator</InputLabel>
+              <Select labelId="port-in-donor" label="Donor operator" value={donor} onChange={e => setDonor(e.target.value)}>
+                {peers.map(o => <MenuItem key={o.operatorCode} value={o.operatorCode}>{o.operatorCode} — {o.operatorName}</MenuItem>)}
+              </Select>
+            </FormControl>
+          </Grid>
+          <Grid item xs={12} sm={6} md={3}>
+            <TextField label="Customer identification" fullWidth value={identification}
+              onChange={e => setIdentification(e.target.value)} helperText="ID number sent with the Check" />
+          </Grid>
+          <Grid item xs={12} sm={6} md={3}>
+            <TextField type="datetime-local" label="Requested port time" fullWidth InputLabelProps={{ shrink: true }}
+              value={portTime} onChange={e => setPortTime(e.target.value)}
+              helperText="Optional; default: shortly after approval" />
+          </Grid>
+        </Grid>
+      </ActionCard>
 
       {results && (
         <Card sx={{ mt: 2 }}>

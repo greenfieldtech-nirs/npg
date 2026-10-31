@@ -1,12 +1,14 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Alert, Box, Button, Card, CardContent, FormControl, InputLabel, MenuItem, Select, Stack, TextField } from '@mui/material'
+import { Alert, Box, Button, Card, FormControl, InputLabel, MenuItem, Select, Stack, TextField } from '@mui/material'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import RowAction from '../components/RowAction'
 import { DataGrid, GridColDef } from '@mui/x-data-grid'
 import { apiErrorMessage, numberRangeApi, operatorApi } from '../api/client'
 import { NumberRange } from '../api/types'
 import PageHeader from '../components/PageHeader'
+import ActionCard from '../components/ActionCard'
+import ViewListIcon from '@mui/icons-material/ViewList'
 
 /**
  * Allocated number blocks per operator. They decide who natively serves a number nobody ported —
@@ -47,22 +49,26 @@ export default function NumberRangesPage() {
   return (
     <Box>
       <PageHeader title="Number Ranges" subtitle="Number blocks allocated to each operator (national format prefixes)" />
-      <Card sx={{ mb: 2 }}>
-        <CardContent>
-          {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+      <Box sx={{ mb: 2 }}>
+        <ActionCard
+          icon={<ViewListIcon />}
+          title="Add a number range"
+          help="A national-format prefix and the operator it is allocated to. The longest matching prefix decides who natively serves a number, ahead of the numbering plan."
+          actions={<Button variant="contained" disabled={!form.operator || !form.prefix} onClick={add}>Add range</Button>}
+        >
+          {error && <Alert severity="error">{error}</Alert>}
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-            <FormControl size="small" sx={{ minWidth: 200 }}>
-              <InputLabel>Operator</InputLabel>
-              <Select label="Operator" value={form.operator} onChange={e => setForm({ ...form, operator: e.target.value })}>
+            <FormControl sx={{ minWidth: 240 }}>
+              <InputLabel id="range-operator">Operator</InputLabel>
+              <Select labelId="range-operator" label="Operator" value={form.operator} onChange={e => setForm({ ...form, operator: e.target.value })}>
                 {(operators.data ?? []).map(o => <MenuItem key={o.operatorCode} value={o.operatorCode}>{o.operatorCode} — {o.operatorName}</MenuItem>)}
               </Select>
             </FormControl>
-            <TextField size="small" label="Prefix (e.g. 0812)" value={form.prefix} onChange={e => setForm({ ...form, prefix: e.target.value })} />
-            <TextField size="small" label="Description" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} sx={{ flex: 1 }} />
-            <Button variant="contained" disabled={!form.operator || !form.prefix} onClick={add}>Add range</Button>
+            <TextField label="Prefix (e.g. 0812)" value={form.prefix} onChange={e => setForm({ ...form, prefix: e.target.value })} />
+            <TextField label="Description" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} sx={{ flex: 1 }} />
           </Stack>
-        </CardContent>
-      </Card>
+        </ActionCard>
+      </Box>
       <Card sx={{ height: 520, p: 1 }}>
         <DataGrid rows={ranges.data ?? []} columns={columns} loading={ranges.isLoading} />
       </Card>

@@ -1,4 +1,4 @@
-import { FormEvent, ReactNode, useEffect, useState } from 'react'
+import { ReactNode, useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
@@ -11,6 +11,8 @@ import { DataGrid, GridColDef } from '@mui/x-data-grid'
 import { apiErrorMessage, numberingPlanApi } from '../api/client'
 import { NumberingPlanLookup, NumberingPlanRange } from '../api/types'
 import PageHeader from '../components/PageHeader'
+import ActionCard from '../components/ActionCard'
+import ManageSearchIcon from '@mui/icons-material/ManageSearch'
 import Loader from '../components/Loader'
 import OperatorAllocationBars from '../components/numberingPlan/OperatorAllocationBars'
 import NumberingPlanImport from '../components/numberingPlan/NumberingPlanImport'
@@ -210,8 +212,8 @@ function NumberLookupCard() {
   const [result, setResult] = useState<NumberingPlanLookup | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const lookup = async (e: FormEvent) => {
-    e.preventDefault()
+  const lookup = async () => {
+    if (!number.trim()) return
     setError(null)
     setResult(null)
     try {
@@ -222,21 +224,16 @@ function NumberLookupCard() {
   }
 
   return (
-    <Card sx={{ height: '100%' }}>
-      <CardContent>
-        <Typography variant="subtitle1" sx={{ mb: 1.5 }}>Look up a number</Typography>
-        <Stack component="form" direction="row" spacing={1} onSubmit={lookup}>
-          <TextField size="small" fullWidth label="Phone number" placeholder="052-234-5678 or +972 3 300 1234"
-            value={number} onChange={e => setNumber(e.target.value)} />
-          <Button type="submit" variant="contained" disabled={!number.trim()} sx={{ flexShrink: 0 }}>Look up</Button>
-        </Stack>
-        {!result && !error && (
-          <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 1.5 }}>
-            Any Israeli format works. Shows the operator the number was originally allocated to, how Google
-            libphonenumber classifies it, and whether this gateway has recorded it as ported.
-          </Typography>
-        )}
-        {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
+    <ActionCard
+      icon={<ManageSearchIcon />}
+      title="Look up a number"
+      help="Any Israeli format. Shows the operator the number was originally allocated to, how Google libphonenumber classifies it, and whether this gateway has recorded it as ported."
+      actions={<Button variant="contained" disabled={!number.trim()} onClick={lookup}>Look up</Button>}
+    >
+        <TextField fullWidth label="Phone number" placeholder="052-000-0555 or +972 8 000 0555"
+          value={number} onChange={e => setNumber(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') lookup() }} />
+        {error && <Alert severity="error">{error}</Alert>}
         {result && (
           <Box sx={{ mt: 2 }}>
             <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
@@ -269,7 +266,6 @@ function NumberLookupCard() {
             </Typography>
           </Box>
         )}
-      </CardContent>
-    </Card>
+    </ActionCard>
   )
 }
