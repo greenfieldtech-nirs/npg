@@ -1,12 +1,17 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { Box, Button, Card, FormControl, InputLabel, MenuItem, Select, Stack, Tab, Tabs } from '@mui/material'
+import { Box, Card, FormControl, InputLabel, MenuItem, Select, Stack, Tab, Tabs } from '@mui/material'
+import ReplayIcon from '@mui/icons-material/Replay'
+import DoneAllIcon from '@mui/icons-material/DoneAll'
+import CancelOutlinedIcon from '@mui/icons-material/CancelOutlined'
+import BoltIcon from '@mui/icons-material/Bolt'
 import { DataGrid, GridColDef } from '@mui/x-data-grid'
 import { queueApi } from '../api/client'
 import { InboxItem, OutboxItem, TimerItem } from '../api/types'
 import PageHeader from '../components/PageHeader'
 import ReasonDialog from '../components/ReasonDialog'
+import RowAction from '../components/RowAction'
 import { useAuth } from '../auth/AuthContext'
 
 const STATUSES: Record<string, string[]> = {
@@ -47,18 +52,21 @@ export default function QueuesPage() {
     { field: 'lastErrorCode', headerName: 'Last error', width: 170 },
     { field: 'workflowUuid', headerName: 'Workflow', width: 90, renderCell: p => workflowLink(p.row.workflowUuid) },
     {
-      field: 'actions', headerName: '', flex: 1, minWidth: 300, sortable: false,
+      field: 'actions', headerName: '', width: 130, sortable: false,
       renderCell: p => canOperate && (
-        <Stack direction="row" spacing={1} sx={{ alignItems: 'center', height: '100%' }}>
+        <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center', height: '100%' }}>
           {['MANUAL_REVIEW', 'FAILED_FINAL', 'UNKNOWN_DELIVERY'].includes(p.row.status) &&
-            <Button size="small" onClick={() => act('Retry delivery', `Re-send ${p.row.itemType} to ${p.row.destination} with a fresh attempt budget.`,
-              reason => queueApi.retryOutbox(p.row.outboxUuid, reason))}>Retry</Button>}
+            <RowAction label="Retry delivery" icon={<ReplayIcon fontSize="small" />} color="primary"
+              onClick={() => act('Retry delivery', `Re-send ${p.row.itemType} to ${p.row.destination} with a fresh attempt budget.`,
+                reason => queueApi.retryOutbox(p.row.outboxUuid, reason))} />}
           {['MANUAL_REVIEW', 'UNKNOWN_DELIVERY'].includes(p.row.status) &&
-            <Button size="small" onClick={() => act('Mark delivered', `Only after ${p.row.destination} confirmed it received ${p.row.itemType}.`,
-              reason => queueApi.markDelivered(p.row.outboxUuid, reason))}>Mark delivered</Button>}
+            <RowAction label="Mark delivered" icon={<DoneAllIcon fontSize="small" />} color="primary"
+              onClick={() => act('Mark delivered', `Only after ${p.row.destination} confirmed it received ${p.row.itemType}.`,
+                reason => queueApi.markDelivered(p.row.outboxUuid, reason))} />}
           {['PENDING', 'FAILED_RETRYABLE', 'MANUAL_REVIEW', 'UNKNOWN_DELIVERY'].includes(p.row.status) &&
-            <Button size="small" color="error" onClick={() => act('Cancel delivery', `${p.row.itemType} will never be sent.`,
-              reason => queueApi.cancelOutbox(p.row.outboxUuid, reason), true)}>Cancel</Button>}
+            <RowAction label="Cancel delivery" icon={<CancelOutlinedIcon fontSize="small" />} color="error"
+              onClick={() => act('Cancel delivery', `${p.row.itemType} will never be sent.`,
+                reason => queueApi.cancelOutbox(p.row.outboxUuid, reason), true)} />}
         </Stack>
       )
     }
@@ -74,8 +82,9 @@ export default function QueuesPage() {
     {
       field: 'actions', headerName: '', width: 110, sortable: false,
       renderCell: p => canOperate && p.row.status === 'FAILED_FINAL' && (
-        <Button size="small" onClick={() => act('Re-process message', `Process ${p.row.itemType} again (after fixing its cause).`,
-          reason => queueApi.retryInbox(p.row.inboxUuid, reason))}>Retry</Button>
+        <RowAction label="Re-process message" icon={<ReplayIcon fontSize="small" />} color="primary"
+          onClick={() => act('Re-process message', `Process ${p.row.itemType} again (after fixing its cause).`,
+            reason => queueApi.retryInbox(p.row.inboxUuid, reason))} />
       )
     }
   ]
@@ -88,13 +97,15 @@ export default function QueuesPage() {
     { field: 'phoneNumber', headerName: 'Number', width: 120 },
     { field: 'workflowUuid', headerName: 'Workflow', width: 90, renderCell: p => workflowLink(p.row.workflowUuid) },
     {
-      field: 'actions', headerName: '', flex: 1, minWidth: 200, sortable: false,
+      field: 'actions', headerName: '', width: 100, sortable: false,
       renderCell: p => canOperate && p.row.status === 'PENDING' && (
-        <Stack direction="row" spacing={1} sx={{ alignItems: 'center', height: '100%' }}>
-          <Button size="small" onClick={() => act('Fire timer now', `${p.row.timerName} fires immediately.`,
-            reason => queueApi.fireTimer(p.row.timerUuid, reason))}>Fire now</Button>
-          <Button size="small" color="error" onClick={() => act('Cancel timer', `${p.row.timerName} will never fire.`,
-            reason => queueApi.cancelTimer(p.row.timerUuid, reason), true)}>Cancel</Button>
+        <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center', height: '100%' }}>
+          <RowAction label="Fire timer now" icon={<BoltIcon fontSize="small" />} color="primary"
+            onClick={() => act('Fire timer now', `${p.row.timerName} fires immediately.`,
+              reason => queueApi.fireTimer(p.row.timerUuid, reason))} />
+          <RowAction label="Cancel timer" icon={<CancelOutlinedIcon fontSize="small" />} color="error"
+            onClick={() => act('Cancel timer', `${p.row.timerName} will never fire.`,
+              reason => queueApi.cancelTimer(p.row.timerUuid, reason), true)} />
         </Stack>
       )
     }

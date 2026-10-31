@@ -1,12 +1,16 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { Box, Button, Card, Chip, FormControl, InputLabel, MenuItem, Select, Stack, Typography } from '@mui/material'
+import { Box, Card, Chip, FormControl, InputLabel, MenuItem, Select, Stack, Typography } from '@mui/material'
+import AssignmentIndOutlinedIcon from '@mui/icons-material/AssignmentIndOutlined'
+import NoteAddOutlinedIcon from '@mui/icons-material/NoteAddOutlined'
+import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline'
 import { DataGrid, GridColDef } from '@mui/x-data-grid'
 import { manualTaskApi } from '../api/client'
 import { ManualTask } from '../api/types'
 import PageHeader from '../components/PageHeader'
 import ReasonDialog from '../components/ReasonDialog'
+import RowAction from '../components/RowAction'
 import { useAuth } from '../auth/AuthContext'
 
 const SEVERITY_COLOR: Record<string, 'error' | 'warning' | 'default'> = { HIGH: 'error', MEDIUM: 'warning', LOW: 'default' }
@@ -40,13 +44,16 @@ export default function ManualTaskQueue() {
     },
     { field: 'assignedTo', headerName: 'Assignee', width: 110 },
     {
-      field: 'actions', headerName: '', width: 250, sortable: false,
+      field: 'actions', headerName: '', width: 130, sortable: false,
       renderCell: p => canOperate && p.row.status !== 'CLOSED' && (
-        <Stack direction="row" spacing={1} sx={{ alignItems: 'center', height: '100%' }}>
+        <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center', height: '100%' }}>
           {p.row.assignedTo !== user?.username &&
-            <Button size="small" onClick={() => manualTaskApi.assign(p.row.taskUuid).then(refresh)}>Take</Button>}
-          <Button size="small" onClick={() => setPending({ task: p.row, kind: 'note' })}>Note</Button>
-          <Button size="small" variant="contained" onClick={() => setPending({ task: p.row, kind: 'resolve' })}>Resolve</Button>
+            <RowAction label="Take this task" icon={<AssignmentIndOutlinedIcon fontSize="small" />}
+              onClick={() => manualTaskApi.assign(p.row.taskUuid).then(refresh)} />}
+          <RowAction label="Add a note" icon={<NoteAddOutlinedIcon fontSize="small" />}
+            onClick={() => setPending({ task: p.row, kind: 'note' })} />
+          <RowAction label="Resolve" icon={<CheckCircleOutlineIcon fontSize="small" />} color="success"
+            onClick={() => setPending({ task: p.row, kind: 'resolve' })} />
         </Stack>
       )
     }

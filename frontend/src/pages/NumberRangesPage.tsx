@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Alert, Box, Button, Card, CardContent, FormControl, IconButton, InputLabel, MenuItem, Select, Stack, TextField } from '@mui/material'
+import { Alert, Box, Button, Card, CardContent, FormControl, InputLabel, MenuItem, Select, Stack, TextField } from '@mui/material'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
+import RowAction from '../components/RowAction'
 import { DataGrid, GridColDef } from '@mui/x-data-grid'
 import { apiErrorMessage, numberRangeApi, operatorApi } from '../api/client'
 import { NumberRange } from '../api/types'
@@ -37,10 +38,8 @@ export default function NumberRangesPage() {
     {
       field: 'actions', headerName: '', width: 70, sortable: false,
       renderCell: p => (
-        <IconButton size="small" aria-label="delete range"
-          onClick={() => numberRangeApi.remove(p.row.id).then(refresh).catch(err => setError(apiErrorMessage(err)))}>
-          <DeleteOutlineIcon fontSize="small" />
-        </IconButton>
+        <RowAction label="Delete range" icon={<DeleteOutlineIcon fontSize="small" />} color="error"
+          onClick={() => numberRangeApi.remove(p.row.id).then(refresh).catch(err => setError(apiErrorMessage(err)))} />
       )
     }
   ]

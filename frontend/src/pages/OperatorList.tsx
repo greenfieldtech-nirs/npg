@@ -8,12 +8,15 @@ import { useAuth } from '../auth/AuthContext'
 import ReasonDialog from '../components/ReasonDialog'
 import {
   Alert, Autocomplete, Box, Button, Card, CardContent, Chip, Dialog, DialogActions, DialogContent,
-  DialogTitle, Divider, FormControl, FormControlLabel, IconButton, InputLabel, MenuItem,
+  DialogTitle, Divider, FormControl, FormControlLabel, InputLabel, MenuItem,
   Select, Switch, Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
 import DeleteIcon from '@mui/icons-material/Delete'
 import EditIcon from '@mui/icons-material/Edit'
+import CloudOffOutlinedIcon from '@mui/icons-material/CloudOffOutlined'
+import CloudDoneOutlinedIcon from '@mui/icons-material/CloudDoneOutlined'
+import RowAction from '../components/RowAction'
 import axios from 'axios'
 
 interface FormState {
@@ -104,9 +107,8 @@ function EndpointsSection({ code }: { code: string }) {
                 <TableCell>{ep.authMode}</TableCell>
                 <TableCell>{ep.isActive ? 'Yes' : 'No'}</TableCell>
                 <TableCell>
-                  <IconButton size="small" onClick={() => remove.mutate(ep.id)} aria-label="delete endpoint">
-                    <DeleteIcon fontSize="small" />
-                  </IconButton>
+                  <RowAction label="Delete endpoint" icon={<DeleteIcon fontSize="small" />} color="error"
+                    onClick={() => remove.mutate(ep.id)} />
                 </TableCell>
               </TableRow>
             ))}
@@ -255,18 +257,15 @@ export default function OperatorList() {
     },
     ...(canManagePeers
       ? [{
-          field: 'actions', headerName: '', width: 150, sortable: false, filterable: false,
+          field: 'actions', headerName: '', width: 100, sortable: false, filterable: false,
           renderCell: (p: { row: Operator }) => (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, height: '100%' }}>
-              <IconButton size="small" onClick={() => openEdit(p.row)} aria-label="edit">
-                <EditIcon fontSize="small" />
-              </IconButton>
-              {!p.row.isLocal && (
-                <Button size="small" color={p.row.availabilityStatus === 'DOWN' ? 'success' : 'warning'}
-                  onClick={() => setAvailability({ operator: p.row, down: p.row.availabilityStatus !== 'DOWN' })}>
-                  {p.row.availabilityStatus === 'DOWN' ? 'Mark up' : 'Mark down'}
-                </Button>
-              )}
+              <RowAction label="Edit operator" icon={<EditIcon fontSize="small" />} onClick={() => openEdit(p.row)} />
+              {!p.row.isLocal && (p.row.availabilityStatus === 'DOWN'
+                ? <RowAction label="Mark up (release held traffic)" icon={<CloudDoneOutlinedIcon fontSize="small" />} color="success"
+                    onClick={() => setAvailability({ operator: p.row, down: false })} />
+                : <RowAction label="Mark down (hold traffic)" icon={<CloudOffOutlinedIcon fontSize="small" />} color="warning"
+                    onClick={() => setAvailability({ operator: p.row, down: true })} />)}
             </Box>
           )
         } as GridColDef<Operator>]

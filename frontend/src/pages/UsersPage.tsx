@@ -6,11 +6,12 @@ import { SystemUser } from '../api/types'
 import PageHeader from '../components/PageHeader'
 import {
   Alert, Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle,
-  FormControl, FormControlLabel, IconButton, InputLabel, MenuItem, Select, Switch,
+  FormControl, FormControlLabel, InputLabel, MenuItem, Select, Switch,
   TextField, Typography, Checkbox, ListItemText, OutlinedInput, SelectChangeEvent
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
 import EditIcon from '@mui/icons-material/Edit'
+import RowAction from '../components/RowAction'
 import axios from 'axios'
 
 const ALL_ROLES = ['ADMIN', 'MANAGER', 'USER']
@@ -118,9 +119,7 @@ export default function UsersPage() {
     {
       field: 'actions', headerName: '', width: 70, sortable: false, filterable: false,
       renderCell: (p: { row: SystemUser }) => (
-        <IconButton size="small" onClick={() => openEdit(p.row)} aria-label="edit">
-          <EditIcon fontSize="small" />
-        </IconButton>
+        <RowAction label="Edit user" icon={<EditIcon fontSize="small" />} onClick={() => openEdit(p.row)} />
       )
     }
   ]
