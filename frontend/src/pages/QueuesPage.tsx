@@ -1,11 +1,11 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
 import { Box, Card, FormControl, InputLabel, MenuItem, Select, Stack, Tab, Tabs } from '@mui/material'
 import ReplayIcon from '@mui/icons-material/Replay'
 import DoneAllIcon from '@mui/icons-material/DoneAll'
 import CancelOutlinedIcon from '@mui/icons-material/CancelOutlined'
 import BoltIcon from '@mui/icons-material/Bolt'
+import SearchIcon from '@mui/icons-material/Search'
 import { DataGrid, GridColDef } from '@mui/x-data-grid'
 import { queueApi } from '../api/client'
 import { InboxItem, OutboxItem, TimerItem } from '../api/types'
@@ -41,7 +41,9 @@ export default function QueuesPage() {
   const act = (title: string, description: string, call: (reason: string) => Promise<unknown>, danger = false) =>
     setPending({ title, description, danger, run: reason => call(reason).then(refresh) })
 
-  const workflowLink = (uuid: string | null | undefined) => (uuid ? <Link to={`/workflows/${uuid}`}>workflow</Link> : '—')
+  const workflowLink = (uuid: string | null | undefined) => (uuid
+    ? <RowAction label="Open workflow" icon={<SearchIcon fontSize="small" />} color="primary" to={`/workflows/${uuid}`} />
+    : '—')
 
   const outboxColumns: GridColDef<OutboxItem>[] = [
     { field: 'updatedAt', headerName: 'Updated', width: 160, valueFormatter: (v: string) => date(v) },
