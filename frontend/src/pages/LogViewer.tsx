@@ -6,6 +6,7 @@ import axios from 'axios'
 import { messageApi } from '../api/client'
 import { Message } from '../api/types'
 import PageHeader from '../components/PageHeader'
+import RefreshButton from '../components/RefreshButton'
 import Loader from '../components/Loader'
 import XmlBlock from '../components/XmlBlock'
 import {
@@ -178,7 +179,7 @@ export default function LogViewer() {
     if (uuid) setOpenUuid(uuid)
   }, [uuid])
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isFetching, refetch } = useQuery({
     queryKey: ['messages', applied],
     queryFn: () => messageApi.search(
       Object.fromEntries(Object.entries(applied).filter(([, v]) => v !== ''))
@@ -261,6 +262,9 @@ export default function LogViewer() {
         />
         <Button variant="contained" onClick={apply}>Apply</Button>
         <Button variant="outlined" onClick={clear}>Clear</Button>
+        <Box sx={{ ml: 'auto' }}>
+          <RefreshButton label="Refresh messages" onRefresh={() => refetch()} refreshing={isFetching} />
+        </Box>
       </Paper>
       <DataGrid
         rows={rows}

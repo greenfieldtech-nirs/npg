@@ -10,6 +10,7 @@ import { DataGrid, GridColDef } from '@mui/x-data-grid'
 import { queueApi } from '../api/client'
 import { InboxItem, OutboxItem, TimerItem } from '../api/types'
 import PageHeader from '../components/PageHeader'
+import RefreshButton from '../components/RefreshButton'
 import ReasonDialog from '../components/ReasonDialog'
 import RowAction from '../components/RowAction'
 import { useAuth } from '../auth/AuthContext'
@@ -36,6 +37,7 @@ export default function QueuesPage() {
   const outbox = useQuery({ queryKey: ['outbox', status], queryFn: () => queueApi.outbox(status), enabled: tab === 'outbox' })
   const inbox = useQuery({ queryKey: ['inbox', status], queryFn: () => queueApi.inbox(status), enabled: tab === 'inbox' })
   const timers = useQuery({ queryKey: ['timers', status], queryFn: () => queueApi.timers(status), enabled: tab === 'timers' })
+  const active = tab === 'outbox' ? outbox : tab === 'inbox' ? inbox : timers
   const refresh = () => queryClient.invalidateQueries({ queryKey: [tab] })
 
   const act = (title: string, description: string, call: (reason: string) => Promise<unknown>, danger = false) =>
@@ -135,6 +137,9 @@ export default function QueuesPage() {
               {STATUSES[tab].map(s => <MenuItem key={s} value={s}>{s}</MenuItem>)}
             </Select>
           </FormControl>
+          <Box sx={{ ml: 'auto !important' }}>
+            <RefreshButton label={`Refresh ${tab}`} onRefresh={() => active.refetch()} refreshing={active.isFetching} />
+          </Box>
         </Stack>
         <Box sx={{ height: 560 }}>{grid}</Box>
       </Card>

@@ -5,6 +5,7 @@ import { DataGrid, GridColDef } from '@mui/x-data-grid'
 import { workflowApi } from '../api/client'
 import { Workflow } from '../api/types'
 import PageHeader from '../components/PageHeader'
+import RefreshButton from '../components/RefreshButton'
 
 const columns: GridColDef<Workflow>[] = [
   { field: 'updatedAt', headerName: 'Updated', width: 160, valueFormatter: (v: string) => v?.replace('T', ' ').slice(0, 19) },
@@ -24,7 +25,7 @@ export default function WorkflowSearch() {
   const [params, setParams] = useSearchParams()
   const filters = Object.fromEntries(FILTERS.map(f => [f, params.get(f) ?? ''])) as Record<(typeof FILTERS)[number], string>
   const query = Object.fromEntries(Object.entries(filters).filter(([, v]) => v)) as Record<string, string>
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isFetching, refetch } = useQuery({
     queryKey: ['workflows', query],
     queryFn: () => workflowApi.search({ ...query, size: 200 })
   })
@@ -57,6 +58,9 @@ export default function WorkflowSearch() {
           {select('workflowType', 'Type', ['PORTING', 'PUBLICATION', 'NUMBER_RETURN', 'NUMBER_INQUIRY', 'MAINTENANCE', 'DATA_SYNCHRONIZATION'])}
           {select('localRole', 'Our role', ['RECIPIENT', 'DONOR', 'OBSERVER', 'CURRENT_OPERATOR', 'ORIGINAL_OPERATOR', 'REQUESTER', 'RESPONDER', 'ANNOUNCER'])}
           <Button onClick={() => setParams(new URLSearchParams(), { replace: true })}>Clear</Button>
+          <Box sx={{ ml: 'auto !important' }}>
+            <RefreshButton label="Refresh workflows" onRefresh={() => refetch()} refreshing={isFetching} />
+          </Box>
         </Stack>
         <Box sx={{ height: 600 }}>
           <DataGrid
