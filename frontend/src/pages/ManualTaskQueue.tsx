@@ -33,7 +33,11 @@ export default function ManualTaskQueue() {
       field: 'severity', headerName: 'Severity', width: 100,
       renderCell: p => <Chip size="small" label={p.row.severity} color={SEVERITY_COLOR[p.row.severity] ?? 'default'} />
     },
-    { field: 'taskType', headerName: 'Type', width: 200 },
+    {
+      field: 'taskType', headerName: 'Type', width: 200,
+      // flex cells (see the grid below) need an element of their own to truncate with an ellipsis
+      renderCell: p => <Typography variant="body2" noWrap title={p.row.taskType}>{p.row.taskType}</Typography>
+    },
     {
       field: 'description', headerName: 'What happened', flex: 1, minWidth: 320,
       renderCell: p => <Typography variant="body2" sx={{ whiteSpace: 'normal', lineHeight: 1.4, py: 1 }}>{p.row.description}</Typography>
@@ -72,6 +76,8 @@ export default function ManualTaskQueue() {
         <Box sx={{ height: 600 }}>
           <DataGrid rows={data ?? []} columns={columns} getRowId={row => row.taskUuid} loading={isLoading}
             getRowHeight={() => 'auto'} pageSizeOptions={[25, 50, 100]}
+            // rows grow with the description: centre every cell, not only the badges
+            sx={{ '& .MuiDataGrid-cell': { display: 'flex', alignItems: 'center', py: 0.5 } }}
             initialState={{ pagination: { paginationModel: { pageSize: 25 } } }} />
         </Box>
       </Card>

@@ -127,6 +127,12 @@ export function createAppTheme(mode: PaletteMode) {
             '--DataGrid-containerBackground': isDark ? brand.ink : brand.paper
           }),
           columnHeaders: ({ theme }) => ({ borderBottom: `1px solid ${theme.palette.divider}` }),
+          // grid cells centre text through line-height, which leaves badges (and boxes holding them) at
+          // the top of the row; cells holding a badge centre their content instead. Plain-text cells keep
+          // block layout so long values still end in an ellipsis.
+          cell: {
+            '&:has(.MuiChip-root)': { display: 'flex', alignItems: 'center' }
+          },
           columnHeaderTitle: { fontWeight: 600 }
         }
       },
