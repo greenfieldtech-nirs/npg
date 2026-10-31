@@ -27,7 +27,10 @@ APP_ROLE=api|inbound|worker|timer|dispatcher|all
 External Operators
     |
     v
-NGINX / TLS / mTLS
+Load balancer (TLS)
+    |  HTTP :8090
+    v
+NGINX (routing, rate limits, real client IP)
     |
     v
 Inbound XML Verticle

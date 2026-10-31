@@ -43,7 +43,8 @@ It also gives the NOC a console to run and supervise all of it.
 - **Security:**
   - JWT login, with roles re-checked against the database on every request.
   - Brute-force protection: per-IP and per-account limits, plus device-trust cookies.
-  - Peer authentication on `/np/inbound`: mTLS subject and/or IP allowlist, receiver must be us.
+  - Peer authentication on `/np/inbound`: IP allowlist (behind the load balancer) or a verified
+    client-certificate subject, and the receiver must be us.
   - Workflows are bound to their counterparty operator.
   - Ownership changes are checked against our records, operator number ranges and the national
     numbering plan; claims nothing can verify are refused.
@@ -70,8 +71,9 @@ It also gives the NOC a console to run and supervise all of it.
 
 ```mermaid
 flowchart TD
-    OP[Peer operators] -->|XML over HTTPS / mTLS| NGINX[Edge NGINX<br/>TLS, rate limits]
-    UI[Console] -->|JSON /api| NGINX
+    OP[Peer operators] -->|XML over HTTPS| LB[Load balancer<br/>TLS]
+    UI[Console] -->|HTTPS| LB
+    LB -->|HTTP :8090| NGINX[Edge NGINX<br/>routing, rate limits]
     NGINX --> IN[inbound<br/>ACK/NACK]
     NGINX --> API[api<br/>management API]
     IN -->|raw XML + SHA-256| MONGO[(MongoDB<br/>XML audit)]
@@ -140,20 +142,25 @@ They cover:
 
 1. Copy `docker/.env.production.example` to `docker/.env.production` and fill in every `REQUIRED`
    value. The stack refuses to start without them: production never runs with default secrets.
-2. Put `cert.pem`, `key.pem` and the peers' CA bundle `peer-ca.pem` in `docker/tls/`
-   (see `docker/tls/README.md`).
+2. Put the stack behind your load balancer. The LB terminates TLS and forwards plain HTTP to
+   NGINX on **port 8090**, which serves everything: the console, `/api`, the operators' `/np`
+   gateway and the `/health/live` health check. Set `LB_TRUSTED_CIDRS` to the load balancer's
+   source addresses: NGINX believes `X-Forwarded-For` only from them, and refuses to start
+   without it. Make 8090 reachable from the load balancer only (`NPG_HTTP_BIND`, firewall).
 3. `./npg -e production start` builds the images and starts each role as its own service, with
    healthchecks and restart policies.
 4. In the console as ADMIN:
    - set this gateway's **local operator** identity;
-   - add each peer with its `NPG_INBOUND` endpoint and credential (client-certificate subject
-     and/or IP allowlist);
+   - add each peer with its `NPG_INBOUND` endpoint and its **IP allowlist** (the peer's source
+     addresses, as the load balancer forwards them);
    - import the **Israel Numbering Plan** (console → Israel Numbering Plan → Refresh from
      data.gov.il; the backend needs outbound HTTPS to data.gov.il, or upload a downloaded copy) and
      set each operator's **numbering plan name** (Operators → edit). NPG then verifies who
      originally holds a number from the plan, and refuses publications it cannot verify;
    - add **number ranges** where you need to override the plan.
-5. Once NGINX verifies client certificates, set `INBOUND_TRUST_PROXY_CLIENT_CERT=true`.
+5. Keep `INBOUND_TRUST_PROXY_CLIENT_CERT=false`: TLS ends at the load balancer, so NGINX cannot
+   verify peer client certificates (it always blanks those headers). If your load balancer verifies
+   peer certificates, peers are still authenticated here by IP allowlist.
 
 Metrics (Prometheus text) and readiness are served on each container's `HEALTH_PORT` (9090) and
 are never routed publicly. Backups: `docker/backup-mariadb.sh` and `docker/backup-mongodb.sh`,
@@ -170,7 +177,9 @@ with credentials taken from the environment. Runbooks are in `docs/operations/ru
 | `NPG_ADMIN_USERNAME` / `NPG_ADMIN_PASSWORD` | `admin` / required in production | first admin account (≥ 12 characters) |
 | `TRUSTED_PROXIES` | none | CIDRs (or `private`) whose `X-Real-IP` / client-certificate headers are believed |
 | `INBOUND_AUTH_MODE` | `strict` (`permissive` in dev) | peer authentication on `/np/inbound` |
-| `INBOUND_TRUST_PROXY_CLIENT_CERT` | `false` | believe NGINX's verified client-certificate subject |
+| `LB_TRUSTED_CIDRS` | required in production | load balancer source addresses; `X-Forwarded-For` is believed only from them |
+| `NPG_HTTP_BIND` | `0.0.0.0` | interface NGINX's port 8090 is published on |
+| `INBOUND_TRUST_PROXY_CLIENT_CERT` | `false` | keep `false` behind the load balancer (NGINX cannot verify client certificates) |
 | `PORT_OUT_DECISION_MODE` | `MANUAL` (`AUTO_APPROVE` in dev) | how the donor answers Check/Request |
 | `PORTING_KD_UPDATE_REQUIRED` | `false` | send KD_update after Request approval |
 | `PORTING_DEFAULT_LEAD_MINUTES` | `15` | port time when the NOC does not request one |
