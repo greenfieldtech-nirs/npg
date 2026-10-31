@@ -8,6 +8,19 @@ import { apiErrorMessage, operatorApi, processApi } from '../api/client'
 import PageHeader from '../components/PageHeader'
 import { useAuth } from '../auth/AuthContext'
 
+// what the NOC picks, and the ISO-8601 duration Down_system carries on the wire
+const MAINTENANCE_DURATIONS: { label: string; iso: string }[] = [
+  { label: '15 minutes', iso: 'PT15M' },
+  { label: '30 minutes', iso: 'PT30M' },
+  { label: '1 hour', iso: 'PT1H' },
+  { label: '2 hours', iso: 'PT2H' },
+  { label: '4 hours', iso: 'PT4H' },
+  { label: '8 hours', iso: 'PT8H' },
+  { label: '12 hours', iso: 'PT12H' },
+  { label: '1 day', iso: 'P1D' },
+  { label: '2 days', iso: 'P2D' }
+]
+
 function ProcessCard({ title, help, children }: { title: string; help: string; children: ReactNode }) {
   return (
     <Grid item xs={12} md={6}>
@@ -82,8 +95,13 @@ export default function ProcessesPage() {
         {hasRole('ADMIN') && (
           <ProcessCard title="Our maintenance" help="Tell every operator that this gateway goes down for maintenance, then that it is back.">
             <TextField size="small" label="Reason" value={maintenance.reason} onChange={e => setMaintenance({ ...maintenance, reason: e.target.value })} />
-            <TextField size="small" label="Expected duration (ISO-8601)" value={maintenance.duration}
-              onChange={e => setMaintenance({ ...maintenance, duration: e.target.value })} />
+            <FormControl size="small" fullWidth>
+              <InputLabel id="maintenance-duration">Expected duration</InputLabel>
+              <Select labelId="maintenance-duration" label="Expected duration" value={maintenance.duration}
+                onChange={e => setMaintenance({ ...maintenance, duration: e.target.value })}>
+                {MAINTENANCE_DURATIONS.map(d => <MenuItem key={d.iso} value={d.iso}>{d.label}</MenuItem>)}
+              </Select>
+            </FormControl>
             <Box sx={{ display: 'flex', gap: 1 }}>
               <Button variant="contained" color="error" disabled={!maintenance.reason}
                 onClick={() => start(() => processApi.announce(true, maintenance.reason, maintenance.duration))}>Announce Down_system</Button>
