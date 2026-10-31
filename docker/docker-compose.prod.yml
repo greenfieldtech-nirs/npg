@@ -51,11 +51,8 @@ services:
     # the load balancer connects here only (plain HTTP; it terminates TLS)
     ports:
       - "${NPG_HTTP_BIND:-0.0.0.0}:8090:8090"
-    environment:
-      LB_TRUSTED_CIDRS: ${LB_TRUSTED_CIDRS:?set LB_TRUSTED_CIDRS to the load balancer source addresses}
     volumes:
       - ../nginx/nginx.prod.conf:/etc/nginx/conf.d/default.conf:ro
-      - ../nginx/40-npg-real-ip.sh:/docker-entrypoint.d/40-npg-real-ip.sh:ro
     depends_on: [api, inbound-gateway, frontend]
     networks: [edge, backend]
 

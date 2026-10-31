@@ -144,9 +144,8 @@ They cover:
    value. The stack refuses to start without them: production never runs with default secrets.
 2. Put the stack behind your load balancer. The LB terminates TLS and forwards plain HTTP to
    NGINX on **port 8090**, which serves everything: the console, `/api`, the operators' `/np`
-   gateway and the `/health/live` health check. Set `LB_TRUSTED_CIDRS` to the load balancer's
-   source addresses: NGINX believes `X-Forwarded-For` only from them, and refuses to start
-   without it. Make 8090 reachable from the load balancer only (`NPG_HTTP_BIND`, firewall).
+   gateway and the `/health/live` health check. NGINX takes the client IP from the load
+   balancer's `X-Forwarded-For` (trusted from private networks, where the load balancer sits).
 3. `./npg -e production start` builds the images and starts each role as its own service, with
    healthchecks and restart policies.
 4. In the console as ADMIN:
@@ -177,7 +176,6 @@ with credentials taken from the environment. Runbooks are in `docs/operations/ru
 | `NPG_ADMIN_USERNAME` / `NPG_ADMIN_PASSWORD` | `admin` / required in production | first admin account (≥ 12 characters) |
 | `TRUSTED_PROXIES` | none | CIDRs (or `private`) whose `X-Real-IP` / client-certificate headers are believed |
 | `INBOUND_AUTH_MODE` | `strict` (`permissive` in dev) | peer authentication on `/np/inbound` |
-| `LB_TRUSTED_CIDRS` | required in production | load balancer source addresses; `X-Forwarded-For` is believed only from them |
 | `NPG_HTTP_BIND` | `0.0.0.0` | interface NGINX's port 8090 is published on |
 | `INBOUND_TRUST_PROXY_CLIENT_CERT` | `false` | keep `false` behind the load balancer (NGINX cannot verify client certificates) |
 | `PORT_OUT_DECISION_MODE` | `MANUAL` (`AUTO_APPROVE` in dev) | how the donor answers Check/Request |
