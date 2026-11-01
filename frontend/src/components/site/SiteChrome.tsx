@@ -5,6 +5,7 @@ import GitHubIcon from '@mui/icons-material/GitHub'
 import { NpgLockup, NpgMark, NpgWordmark } from '../brand/NpgMark'
 import { brand, MONO_FONT } from '../../theme/brand'
 import { REPO_URL, signalButton } from './site'
+import { measurementId, OPEN_CONSENT_EVENT } from '../../analytics/analytics'
 import ColorModeToggle from '../ColorModeToggle'
 
 const navLink = { color: brand.mist, '&:hover': { color: brand.paper, bgcolor: 'transparent' } }
@@ -55,6 +56,12 @@ export function SiteFooter() {
           <Box component={RouterLink} to="/compatibility" sx={{ color: brand.signal }}>compatibility</Box>
           <Box component="a" href={REPO_URL} target="_blank" rel="noopener noreferrer" sx={{ color: brand.signal }}>github</Box>
           <Box component={RouterLink} to="/login" sx={{ color: brand.signal }}>sign in</Box>
+          {measurementId() && (
+            <Box component="button" type="button" onClick={() => window.dispatchEvent(new Event(OPEN_CONSENT_EVENT))}
+              sx={{ all: 'unset', cursor: 'pointer', color: brand.signal, textDecoration: 'underline', '&:focus-visible': { outline: `2px solid ${brand.signal}` } }}>
+              cookie settings
+            </Box>
+          )}
         </Box>
       </Container>
     </Box>

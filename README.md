@@ -190,6 +190,7 @@ with credentials taken from the environment. Runbooks are in `docs/operations/ru
 | `QUEUE_CLAIM_BATCH_SIZE` / `QUEUE_LOCK_SECONDS` | `10` / `60` | queue claiming |
 | `LOGIN_MAX_ATTEMPTS_PER_IP` / `_PER_ACCOUNT` | `20` / `10` | login throttling |
 | `HEALTH_PORT` | `9090` | health and metrics |
+| `GA_MEASUREMENT_ID` | empty (off) | Google Analytics 4 id for the public pages only, after visitor consent; read by the frontend container at start |
 | `NUMBERING_PLAN_URL` | data.gov.il plan | numbering-plan source fetched by "Refresh from data.gov.il" (https outside dev) |
 | `CATALOG_PATH` | `/app/protocol` in the image | protocol model (`docs/protocol`) |
 

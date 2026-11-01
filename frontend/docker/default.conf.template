@@ -1,5 +1,8 @@
 # Static console only. Routing of /api and /np is done by the edge proxy (nginx/), so this
 # container never needs to know where the backend runs.
+#
+# A template: the nginx image substitutes environment variables at start (only defined ones, so
+# nginx's own $variables are untouched). GA_MEASUREMENT_ID is checked by 05-npg-runtime-config.sh.
 server {
     listen 8080;
     server_name _;
@@ -9,6 +12,13 @@ server {
     add_header X-Content-Type-Options nosniff always;
     add_header X-Frame-Options DENY always;
     add_header Referrer-Policy no-referrer always;
+
+    # runtime settings for the browser, from the container environment (no rebuild to change them)
+    location = /runtime-config.js {
+        default_type application/javascript;
+        add_header Cache-Control "no-store";
+        return 200 'window.__NPG_CONFIG__ = { gaMeasurementId: "${GA_MEASUREMENT_ID}" };';
+    }
 
     location /assets/ {
         add_header Cache-Control "public, max-age=31536000, immutable";

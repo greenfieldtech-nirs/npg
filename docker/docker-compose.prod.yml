@@ -61,6 +61,9 @@ services:
       context: ../frontend
     image: npg-frontend:${NPG_IMAGE_TAG:-latest}
     restart: unless-stopped
+    environment:
+      # Google Analytics for the public site only, after consent; empty turns it off
+      GA_MEASUREMENT_ID: ${GA_MEASUREMENT_ID:-}
     networks: [edge]
 
   api:

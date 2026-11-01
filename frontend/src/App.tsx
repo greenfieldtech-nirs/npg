@@ -5,6 +5,7 @@ import Loader from './components/Loader'
 import { useAuth } from './auth/AuthContext'
 import Login from './pages/Login'
 import LandingPage from './pages/LandingPage'
+import AnalyticsConsent from './analytics/AnalyticsConsent'
 
 // pages load on demand: the console's first paint only needs the shell
 const Dashboard = lazy(() => import('./pages/Dashboard'))
@@ -51,6 +52,8 @@ function RequireOperator({ children }: { children: ReactNode }) {
 
 function App() {
   return (
+    <>
+    <AnalyticsConsent />
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/landing" element={<LandingPage />} />
@@ -86,6 +89,7 @@ function App() {
         }
       />
     </Routes>
+    </>
   )
 }
 

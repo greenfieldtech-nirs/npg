@@ -96,6 +96,8 @@ services:
       context: ../frontend
       dockerfile: Dockerfile
     container_name: npg-frontend
+    environment:
+      GA_MEASUREMENT_ID: ${GA_MEASUREMENT_ID:-}
     networks:
       - npg_dev
     depends_on:

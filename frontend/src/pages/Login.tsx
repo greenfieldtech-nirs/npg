@@ -8,6 +8,7 @@ import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined'
 import VisibilityOffOutlinedIcon from '@mui/icons-material/VisibilityOffOutlined'
 import axios from 'axios'
 import { useAuth } from '../auth/AuthContext'
+import { isLoaded as analyticsLoaded } from '../analytics/analytics'
 import { NpgLockup } from '../components/brand/NpgMark'
 import ColorModeToggle from '../components/ColorModeToggle'
 import { REPO_URL } from '../components/site/site'
@@ -34,7 +35,10 @@ export default function Login() {
     setError(null)
     try {
       await login(username, password)
-      navigate(from, { replace: true })
+      // a page that loaded Google Analytics enters the console with a full page load, so GA's
+      // automatic page tracking never sees console URLs (phone numbers, ids)
+      if (analyticsLoaded() && from.startsWith('/') && !from.startsWith('//')) window.location.replace(from)
+      else navigate(from, { replace: true })
     } catch (err) {
       setError(
         axios.isAxiosError(err) && err.response?.status === 401
